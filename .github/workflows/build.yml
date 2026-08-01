@@ -7,9 +7,11 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Test subtitle parsing and reconstruction
+        run: ./scripts/test-parser.sh
       - name: Build universal app bundle
         run: ./scripts/build-release.sh
       - name: Verify code signature

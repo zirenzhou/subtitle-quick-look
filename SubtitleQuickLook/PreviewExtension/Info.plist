@@ -6,12 +6,13 @@
     <dict>
         <key>NSExtensionAttributes</key>
         <dict>
-            <key>QLIsDataBasedPreview</key>
-            <true/>
             <key>QLSupportedContentTypes</key>
             <array>
                 <string>org.w3.webvtt</string>
                 <string>io.github.zirenzhou.subtitle-quick-look.lrc</string>
+                <string>io.github.zirenzhou.subtitle-quick-look.srt</string>
+                <string>com.firecore.fileformat.srt</string>
+                <string>dyn.ah62d4rv4ge81g6xy</string>
             </array>
             <key>QLSupportsSearchableItems</key>
             <false/>

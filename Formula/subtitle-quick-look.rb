@@ -1,12 +1,12 @@
 class SubtitleQuickLook < Formula
-  desc "Quick Look plain-text previews for VTT and LRC files"
+  desc "Quick Look previews and native translation for VTT, LRC, and SRT files"
   homepage "https://github.com/zirenzhou/subtitle-quick-look"
   url "https://github.com/zirenzhou/subtitle-quick-look/releases/download/v1.0.0/subtitle-quick-look-1.0.0.tar.gz"
   sha256 "b01d7addbe7a5a9d0df1d3c0158fc3fa3d2443a0280f45418c66690ec1989257"
   license "MIT"
 
-  depends_on xcode: ["15.0", :build]
-  depends_on macos: :ventura
+  depends_on xcode: ["16.0", :build]
+  depends_on macos: :sequoia
 
   def install
     ENV["VERSION"] = version.to_s

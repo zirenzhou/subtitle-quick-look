@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:03,000
+The quiet harbor was covered in morning fog.
+
+2
+00:00:03,500 --> 00:00:07,000
+She checked the map before the train arrived.
+
+3
+00:00:07,500 --> 00:00:11,000
+No one expected the old radio to work again.

@@ -1,34 +1,960 @@
-import Foundation
-import QuickLookUI
-import UniformTypeIdentifiers
+import AppKit
+import Carbon
 import CoreFoundation
+import Foundation
+import NaturalLanguage
+import QuickLookUI
+import SwiftUI
+import Translation
+import UniformTypeIdentifiers
 
-final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
-    private static let maximumPreviewBytes = 8 * 1_024 * 1_024
+final class PreviewProvider: NSViewController, QLPreviewingController {
+    private let model = PreviewModel()
 
-    func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
-        let fileURL = request.fileURL
-        let reply = QLPreviewReply(
-            dataOfContentType: .plainText,
-            contentSize: CGSize(width: 800, height: 1_000)
-        ) { reply in
-            let didAccess = fileURL.startAccessingSecurityScopedResource()
-            defer {
-                if didAccess {
-                    fileURL.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            let result = try Self.loadText(from: fileURL)
-            reply.stringEncoding = .utf8
-            reply.title = fileURL.lastPathComponent
-            return Data(result.utf8)
-        }
-
-        return reply
+    override func loadView() {
+        view = NSHostingView(rootView: PreviewRootView(model: model))
+        preferredContentSize = NSSize(width: 800, height: 1_000)
     }
 
-    private static func loadText(from url: URL) throws -> String {
+    func preparePreviewOfFile(
+        at url: URL,
+        completionHandler handler: @escaping (Error?) -> Void
+    ) {
+        Task {
+            do {
+                let payload = try await Task.detached {
+                    let didAccess = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if didAccess {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    let loaded = try TextLoader.load(from: url)
+                    return PreviewPayload(
+                        url: url,
+                        loadedText: loaded,
+                        document: SubtitleDocument(text: loaded.text, fileExtension: url.pathExtension)
+                    )
+                }.value
+
+                model.load(payload)
+                handler(nil)
+            } catch {
+                handler(error)
+            }
+        }
+    }
+}
+
+@MainActor
+private final class PreviewModel: ObservableObject {
+    @Published private(set) var originalText = ""
+    @Published private(set) var translatedText = ""
+    @Published private(set) var filename = ""
+    @Published private(set) var isTranslating = false
+    @Published private(set) var translationProgress = 0.0
+    @Published private(set) var isSaving = false
+    @Published private(set) var didSave = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var noticeMessage: String?
+    @Published private(set) var commonLanguages: [LanguageOption] = []
+    @Published private(set) var otherLanguages: [LanguageOption] = []
+    @Published var configuration: TranslationSession.Configuration?
+    @Published private(set) var translationIsOpen: Bool
+
+    weak var hostWindow: NSWindow?
+
+    private var fileURL: URL?
+    private var loadedText: LoadedText?
+    private var document: SubtitleDocument?
+    private var allLanguages: [LanguageOption] = []
+    private var detectedDocumentLanguageIdentifier: String?
+    private var usingSecondaryTarget = false
+    private var translations: [String: String] = [:]
+    private var translationRevision = UUID()
+    private var noticeRevision = UUID()
+    private var progressTask: Task<Void, Never>?
+    private var recentLanguageIdentifiers: [String]
+
+    private let defaults = UserDefaults.standard
+    private let enabledKey = "translationEnabled"
+    private let sourceKey = "translationSourceLanguage"
+    private let targetKey = "translationTargetLanguage"
+    private let secondaryTargetKey = "translationSecondaryTargetLanguage"
+    private let recentLanguagesKey = "translationRecentLanguages"
+    private let maximumCommonLanguages = 6
+    private let primaryDeviceLanguageIdentifier: String
+    private var primaryTargetIdentifier: String
+    private var secondaryTargetIdentifier: String
+
+    private(set) var sourceIdentifier: String?
+    private(set) var targetIdentifier: String
+
+    init() {
+        let primaryDeviceLanguage = LanguageIdentity.identifier(Self.systemLanguageIdentifier)
+        let storedPrimaryTarget = defaults.string(forKey: targetKey) ?? primaryDeviceLanguage
+        let storedSecondaryTarget = defaults.string(forKey: secondaryTargetKey)
+            ?? Self.defaultSecondaryTarget(excluding: primaryDeviceLanguage)
+
+        primaryDeviceLanguageIdentifier = primaryDeviceLanguage
+        primaryTargetIdentifier = LanguageIdentity.identifier(storedPrimaryTarget)
+        secondaryTargetIdentifier = LanguageIdentity.identifier(storedSecondaryTarget)
+        translationIsOpen = defaults.bool(forKey: enabledKey)
+        sourceIdentifier = defaults.string(forKey: sourceKey).map(LanguageIdentity.identifier)
+        targetIdentifier = primaryTargetIdentifier
+        recentLanguageIdentifiers = defaults.stringArray(forKey: recentLanguagesKey)?
+            .map(LanguageIdentity.identifier) ?? []
+    }
+
+    var visibleText: String {
+        translationIsOpen && !translatedText.isEmpty ? translatedText : originalText
+    }
+
+    var canSave: Bool {
+        translationIsOpen
+            && !isTranslating
+            && !isSaving
+            && !translations.isEmpty
+            && loadedText?.wasTruncated == false
+    }
+
+    var autoLabel: String { L10n.auto }
+
+    var sourceLanguageName: String {
+        guard let sourceIdentifier else { return autoLabel }
+        return languageName(for: sourceIdentifier)
+    }
+
+    var targetLanguageName: String {
+        languageName(for: targetIdentifier)
+    }
+
+    func load(_ payload: PreviewPayload) {
+        fileURL = payload.url
+        loadedText = payload.loadedText
+        document = payload.document
+        filename = payload.url.lastPathComponent
+        originalText = payload.loadedText.previewText
+        translatedText = ""
+        translations = [:]
+        errorMessage = nil
+        noticeMessage = nil
+        progressTask?.cancel()
+        translationProgress = 0
+        detectedDocumentLanguageIdentifier = Self.detectedSourceLanguage(in: payload.document)
+        usingSecondaryTarget = false
+        targetIdentifier = primaryTargetIdentifier
+        translationIsOpen = defaults.bool(forKey: enabledKey)
+            && !isPrimaryDeviceLanguageDocument
+
+        if translationIsOpen {
+            beginTranslation()
+        }
+        Task { await loadSupportedLanguages() }
+    }
+
+    func setHostWindow(_ window: NSWindow?) {
+        hostWindow = window
+    }
+
+    func openTranslation() {
+        noticeMessage = nil
+        usingSecondaryTarget = shouldUseSecondaryForManualTranslation
+        if usingSecondaryTarget {
+            targetIdentifier = secondaryTargetIdentifier
+        } else {
+            targetIdentifier = primaryTargetIdentifier
+        }
+        translationIsOpen = true
+        defaults.set(true, forKey: enabledKey)
+        rebuildLanguageMenus()
+        beginTranslation()
+    }
+
+    func closeTranslation() {
+        translationIsOpen = false
+        defaults.set(false, forKey: enabledKey)
+        translationRevision = UUID()
+        progressTask?.cancel()
+        translationProgress = 0
+        isTranslating = false
+        errorMessage = nil
+    }
+
+    func setSource(_ identifier: String?) {
+        sourceIdentifier = identifier.map(LanguageIdentity.identifier)
+        if let sourceIdentifier {
+            defaults.set(sourceIdentifier, forKey: sourceKey)
+            rememberLanguage(sourceIdentifier)
+        } else {
+            defaults.removeObject(forKey: sourceKey)
+        }
+        rebuildLanguageMenus()
+        beginTranslation()
+    }
+
+    func setTarget(_ identifier: String) {
+        targetIdentifier = LanguageIdentity.identifier(identifier)
+        if usingSecondaryTarget {
+            if detectedDocumentLanguageIdentifier.map({
+                LanguageIdentity.matches($0, targetIdentifier)
+            }) != true {
+                secondaryTargetIdentifier = targetIdentifier
+                defaults.set(targetIdentifier, forKey: secondaryTargetKey)
+            }
+        } else {
+            primaryTargetIdentifier = targetIdentifier
+            defaults.set(targetIdentifier, forKey: targetKey)
+        }
+        rememberLanguage(targetIdentifier)
+        rebuildLanguageMenus()
+        beginTranslation()
+    }
+
+    func translate(using session: TranslationSession) async {
+        guard translationIsOpen, let document else { return }
+        let revision = translationRevision
+        let units = document.units
+
+        guard !units.isEmpty else {
+            progressTask?.cancel()
+            translationProgress = 0
+            isTranslating = false
+            errorMessage = L10n.noSubtitleText
+            return
+        }
+
+        do {
+            var translated: [String: String] = [:]
+            let requests = units.map {
+                TranslationSession.Request(sourceText: $0.sourceText, clientIdentifier: $0.id)
+            }
+
+            for start in stride(from: 0, to: requests.count, by: 50) {
+                guard translationIsOpen, translationRevision == revision else { return }
+                let end = min(start + 50, requests.count)
+                let responses = try await session.translations(from: Array(requests[start..<end]))
+                guard translationIsOpen, translationRevision == revision else { return }
+                if let detectedSource = responses.first?.sourceLanguage,
+                   LanguageIdentity.matches(
+                    detectedSource.minimalIdentifier,
+                    targetIdentifier
+                   ) {
+                    finishWithoutTranslation()
+                    return
+                }
+                for response in responses {
+                    if let identifier = response.clientIdentifier {
+                        translated[identifier] = response.targetText
+                    }
+                }
+                let completedFraction = Double(end) / Double(requests.count)
+                translationProgress = max(translationProgress, completedFraction * 0.9)
+            }
+
+            guard translationIsOpen, translationRevision == revision else { return }
+            translations = translated
+            progressTask?.cancel()
+            translationProgress = 1
+            try? await Task.sleep(for: .milliseconds(240))
+            guard translationIsOpen, translationRevision == revision else { return }
+            translatedText = document.render(using: translated)
+            isTranslating = false
+        } catch {
+            guard translationRevision == revision else { return }
+            if TranslationError.unsupportedLanguagePairing ~= error {
+                finishWithoutTranslation()
+                return
+            }
+            progressTask?.cancel()
+            translationProgress = 0
+            isTranslating = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func requestSaveAs() {
+        guard canSave, let fileURL else { return }
+        guard let window = hostWindow else {
+            errorMessage = L10n.cannotShowSavePanel
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.title = L10n.saveTranslatedSubtitle
+        panel.prompt = L10n.saveAs
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.directoryURL = fileURL.deletingLastPathComponent()
+        panel.nameFieldStringValue = suggestedFilename(for: fileURL)
+        if let contentType = UTType(filenameExtension: fileURL.pathExtension) {
+            panel.allowedContentTypes = [contentType]
+        }
+
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let destinationURL = panel.url else { return }
+            Task { @MainActor in
+                self?.saveTranslatedCopy(to: destinationURL)
+            }
+        }
+    }
+
+    private func beginTranslation() {
+        guard translationIsOpen, document != nil else { return }
+        if let sourceIdentifier,
+           LanguageIdentity.matches(sourceIdentifier, targetIdentifier) {
+            finishWithoutTranslation()
+            return
+        }
+        if sourceIdentifier == nil,
+           let document,
+           let detectedSource = Self.detectedSourceLanguage(in: document),
+           LanguageIdentity.matches(detectedSource, targetIdentifier) {
+            finishWithoutTranslation()
+            return
+        }
+        isTranslating = true
+        errorMessage = nil
+        translatedText = ""
+        translations = [:]
+        translationRevision = UUID()
+        translationProgress = 0
+        startProgressAnimation(for: translationRevision)
+
+        let source = sourceIdentifier.map(Locale.Language.init(identifier:))
+        let target = Locale.Language(identifier: targetIdentifier)
+        if var existing = configuration {
+            existing.source = source
+            existing.target = target
+            existing.invalidate()
+            configuration = existing
+        } else {
+            configuration = TranslationSession.Configuration(source: source, target: target)
+        }
+    }
+
+    private func startProgressAnimation(for revision: UUID) {
+        progressTask?.cancel()
+        progressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .milliseconds(100))
+                } catch {
+                    return
+                }
+
+                guard
+                    let self,
+                    self.translationIsOpen,
+                    self.isTranslating,
+                    self.translationRevision == revision
+                else { return }
+
+                let remaining = 0.88 - self.translationProgress
+                guard remaining > 0 else { continue }
+                self.translationProgress += max(0.004, remaining * 0.035)
+            }
+        }
+    }
+
+    private func finishWithoutTranslation() {
+        translationRevision = UUID()
+        progressTask?.cancel()
+        translationProgress = 0
+        isTranslating = false
+        translatedText = ""
+        translations = [:]
+        errorMessage = nil
+        translationIsOpen = false
+
+        let revision = UUID()
+        noticeRevision = revision
+        noticeMessage = L10n.noTranslationNeeded
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard let self, self.noticeRevision == revision else { return }
+            self.noticeMessage = nil
+        }
+    }
+
+    private static func detectedSourceLanguage(in document: SubtitleDocument) -> String? {
+        let sample = document.units
+            .prefix(40)
+            .map(\.sourceText)
+            .joined(separator: "\n")
+        guard !sample.isEmpty else { return nil }
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(sample)
+        guard
+            let hypothesis = recognizer.languageHypotheses(withMaximum: 1).first,
+            hypothesis.value >= 0.8
+        else { return nil }
+        return hypothesis.key.rawValue
+    }
+
+    private var isPrimaryDeviceLanguageDocument: Bool {
+        detectedDocumentLanguageIdentifier.map {
+            LanguageIdentity.matches($0, primaryDeviceLanguageIdentifier)
+        } == true
+    }
+
+    private var shouldUseSecondaryForManualTranslation: Bool {
+        guard let detectedDocumentLanguageIdentifier else { return false }
+        return LanguageIdentity.matches(
+            detectedDocumentLanguageIdentifier,
+            primaryDeviceLanguageIdentifier
+        ) || LanguageIdentity.matches(
+            detectedDocumentLanguageIdentifier,
+            primaryTargetIdentifier
+        )
+    }
+
+    private func suggestedFilename(for fileURL: URL) -> String {
+        let stem = fileURL.deletingPathExtension().lastPathComponent
+        let language = targetIdentifier.replacingOccurrences(of: "/", with: "-")
+        let fileExtension = fileURL.pathExtension
+        return fileExtension.isEmpty
+            ? "\(stem).\(language)"
+            : "\(stem).\(language).\(fileExtension)"
+    }
+
+    private func saveTranslatedCopy(to destinationURL: URL) {
+        guard
+            let loadedText,
+            let document,
+            canSave
+        else { return }
+
+        let output = document.render(using: translations)
+        guard let data = output.data(using: loadedText.encoding, allowLossyConversion: false)
+            ?? output.data(using: .utf8)
+        else {
+            errorMessage = L10n.cannotEncode
+            return
+        }
+
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                try await Task.detached {
+                    let didAccess = destinationURL.startAccessingSecurityScopedResource()
+                    defer {
+                        if didAccess {
+                            destinationURL.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    try data.write(to: destinationURL, options: .atomic)
+                }.value
+                isSaving = false
+                didSave = true
+                try? await Task.sleep(for: .seconds(1.5))
+                didSave = false
+            } catch {
+                isSaving = false
+                errorMessage = L10n.saveFailed
+            }
+        }
+    }
+
+    private func loadSupportedLanguages() async {
+        let supported = await LanguageAvailability().supportedLanguages
+        var optionsByIdentifier: [String: LanguageOption] = [:]
+        for language in supported {
+            let identifier = LanguageIdentity.identifier(language.minimalIdentifier)
+            optionsByIdentifier[identifier] = LanguageOption(
+                id: identifier,
+                name: LanguageIdentity.autonym(for: identifier)
+            )
+        }
+        allLanguages = optionsByIdentifier.values
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+
+        guard !allLanguages.isEmpty else { return }
+        let previousTarget = targetIdentifier
+        primaryTargetIdentifier = resolvedTarget(
+            preferred: [primaryTargetIdentifier, primaryDeviceLanguageIdentifier, "en"]
+        )
+        secondaryTargetIdentifier = resolvedTarget(
+            preferred: [
+                secondaryTargetIdentifier,
+                Self.defaultSecondaryTarget(excluding: primaryDeviceLanguageIdentifier),
+                "en"
+            ],
+            excluding: primaryDeviceLanguageIdentifier
+        )
+        targetIdentifier = usingSecondaryTarget
+            ? secondaryTargetIdentifier
+            : primaryTargetIdentifier
+        defaults.set(primaryTargetIdentifier, forKey: targetKey)
+        defaults.set(secondaryTargetIdentifier, forKey: secondaryTargetKey)
+        if let sourceIdentifier,
+           !allLanguages.contains(where: { $0.id == sourceIdentifier }) {
+            self.sourceIdentifier = nil
+            defaults.removeObject(forKey: sourceKey)
+        }
+        recentLanguageIdentifiers = Self.uniqueLanguageIdentifiers(recentLanguageIdentifiers)
+        defaults.set(recentLanguageIdentifiers, forKey: recentLanguagesKey)
+        rebuildLanguageMenus()
+        if translationIsOpen, previousTarget != targetIdentifier {
+            beginTranslation()
+        }
+    }
+
+    private func resolvedTarget(
+        preferred: [String],
+        excluding excludedIdentifier: String? = nil
+    ) -> String {
+        let excludedIdentity = excludedIdentifier.map(LanguageIdentity.identifier)
+        for candidate in preferred.map(LanguageIdentity.identifier) {
+            guard candidate != excludedIdentity else { continue }
+            if allLanguages.contains(where: { $0.id == candidate }) {
+                return candidate
+            }
+        }
+        return allLanguages.first(where: { $0.id != excludedIdentity })?.id
+            ?? allLanguages.first?.id
+            ?? "en"
+    }
+
+    private func languageName(for identifier: String) -> String {
+        commonLanguages.first(where: { $0.id == identifier })?.name
+            ?? otherLanguages.first(where: { $0.id == identifier })?.name
+            ?? LanguageIdentity.autonym(for: identifier)
+    }
+
+    private func rememberLanguage(_ identifier: String) {
+        let identity = LanguageIdentity.identifier(identifier)
+        recentLanguageIdentifiers.removeAll { $0 == identity }
+        recentLanguageIdentifiers.insert(identity, at: 0)
+        recentLanguageIdentifiers = Array(recentLanguageIdentifiers.prefix(maximumCommonLanguages))
+        defaults.set(recentLanguageIdentifiers, forKey: recentLanguagesKey)
+    }
+
+    private func rebuildLanguageMenus() {
+        guard !allLanguages.isEmpty else { return }
+        let supportedIDs = Set(allLanguages.map(\.id))
+        let deviceIDs = Self.deviceLanguageIdentifiers(supported: allLanguages)
+        let selected = [sourceIdentifier, targetIdentifier].compactMap { $0 }
+        var commonIDs: [String] = []
+
+        func appendIfNeeded(_ identifier: String) {
+            guard
+                commonIDs.count < maximumCommonLanguages,
+                supportedIDs.contains(identifier),
+                !commonIDs.contains(identifier)
+            else { return }
+            commonIDs.append(identifier)
+        }
+
+        selected.forEach(appendIfNeeded)
+        deviceIDs.prefix(4).forEach(appendIfNeeded)
+        recentLanguageIdentifiers.forEach(appendIfNeeded)
+        deviceIDs.forEach(appendIfNeeded)
+
+        if commonIDs.count < maximumCommonLanguages {
+            allLanguages.map(\.id).prefix(1).forEach(appendIfNeeded)
+        }
+
+        let rank = Dictionary(uniqueKeysWithValues: commonIDs.enumerated().map { ($1, $0) })
+        commonLanguages = allLanguages
+            .filter { rank[$0.id] != nil }
+            .sorted { rank[$0.id, default: Int.max] < rank[$1.id, default: Int.max] }
+        otherLanguages = allLanguages.filter { rank[$0.id] == nil }
+    }
+
+    private static func deviceLanguageIdentifiers(
+        supported: [LanguageOption]
+    ) -> [String] {
+        var signals = Locale.preferredLanguages
+        signals.append(Locale.current.identifier)
+        signals.append(contentsOf: keyboardLanguageIdentifiers())
+        signals.append(contentsOf: timeZoneLanguageIdentifiers())
+        signals.append("en")
+
+        var ordered: [String] = []
+        var seen = Set<String>()
+
+        func append(_ identifier: String) {
+            guard seen.insert(identifier).inserted else { return }
+            ordered.append(identifier)
+        }
+
+        for signal in signals {
+            let identity = LanguageIdentity.identifier(signal)
+            if let exact = supported.first(where: { $0.id == identity }) {
+                append(exact.id)
+            }
+
+            if identity == "zh-Hans" || identity == "zh-Hant" {
+                for relatedIdentity in ["zh-Hans", "zh-Hant"] {
+                    if let related = supported.first(where: { $0.id == relatedIdentity }) {
+                        append(related.id)
+                    }
+                }
+            }
+        }
+
+        return ordered
+    }
+
+    private static func uniqueLanguageIdentifiers(_ identifiers: [String]) -> [String] {
+        var seen = Set<String>()
+        return identifiers
+            .map(LanguageIdentity.identifier)
+            .filter { seen.insert($0).inserted }
+    }
+
+    private static func keyboardLanguageIdentifiers() -> [String] {
+        let filter = [
+            kTISPropertyInputSourceIsEnabled as String: true,
+            kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as String
+        ] as CFDictionary
+        guard let sourceList = TISCreateInputSourceList(filter, false) else { return [] }
+        let inputSources = sourceList.takeRetainedValue() as NSArray
+        var identifiers: [String] = []
+
+        for case let inputSource as TISInputSource in inputSources {
+            guard
+                let rawLanguages = TISGetInputSourceProperty(
+                    inputSource,
+                    kTISPropertyInputSourceLanguages
+                )
+            else { continue }
+            let languages = Unmanaged<CFArray>
+                .fromOpaque(rawLanguages)
+                .takeUnretainedValue() as? [String]
+            if let primaryLanguage = languages?.first {
+                identifiers.append(primaryLanguage)
+            }
+        }
+
+        return identifiers
+    }
+
+    private static func timeZoneLanguageIdentifiers() -> [String] {
+        let identifier = TimeZone.current.identifier
+
+        switch identifier {
+        case "Asia/Tokyo": return ["ja"]
+        case "Asia/Seoul": return ["ko"]
+        case "Asia/Shanghai", "Asia/Chongqing", "Asia/Urumqi": return ["zh-Hans"]
+        case "Asia/Hong_Kong", "Asia/Macau", "Asia/Taipei": return ["zh-Hant"]
+        case "Asia/Singapore": return ["en", "zh-Hans"]
+        case "Asia/Bangkok": return ["th"]
+        case "Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura": return ["id"]
+        case "Asia/Kuala_Lumpur", "Asia/Kuching": return ["ms", "en"]
+        case "Asia/Manila": return ["fil", "en"]
+        case "Asia/Kolkata", "Asia/Calcutta": return ["hi", "en"]
+        case "Europe/London": return ["en"]
+        case "Europe/Paris": return ["fr"]
+        case "Europe/Berlin", "Europe/Vienna", "Europe/Zurich": return ["de"]
+        case "Europe/Madrid": return ["es"]
+        case "Europe/Rome": return ["it"]
+        case "Europe/Lisbon": return ["pt"]
+        case "Europe/Amsterdam": return ["nl"]
+        case "Europe/Warsaw": return ["pl"]
+        case "Europe/Moscow": return ["ru"]
+        default:
+            if identifier.hasPrefix("America/") { return ["en", "es"] }
+            if identifier.hasPrefix("Australia/") || identifier.hasPrefix("Pacific/Auckland") {
+                return ["en"]
+            }
+            return []
+        }
+    }
+
+    private static func defaultSecondaryTarget(excluding primaryIdentifier: String) -> String {
+        var candidates = Array(Locale.preferredLanguages.dropFirst())
+        candidates.append(contentsOf: keyboardLanguageIdentifiers())
+        candidates.append(contentsOf: timeZoneLanguageIdentifiers())
+        candidates.append("en")
+        candidates.append("zh-Hans")
+
+        let primaryIdentity = LanguageIdentity.identifier(primaryIdentifier)
+        return candidates
+            .map(LanguageIdentity.identifier)
+            .first(where: { $0 != primaryIdentity }) ?? "en"
+    }
+
+    private static var systemLanguageIdentifier: String {
+        let preferred = Locale.preferredLanguages.first ?? Locale.current.identifier
+        return Locale.Language(identifier: preferred).minimalIdentifier
+    }
+}
+
+private struct PreviewRootView: View {
+    @ObservedObject var model: PreviewModel
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color(nsColor: .textBackgroundColor)
+                .ignoresSafeArea()
+
+            ScrollView {
+                Text(model.visibleText)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(Color(nsColor: .textColor))
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(16)
+                    .textSelection(.enabled)
+            }
+
+            if model.translationIsOpen {
+                translationPanel
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
+            } else {
+                Button(action: model.openTranslation) {
+                    Image(systemName: "translate")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 38, height: 38)
+                        .background(.regularMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help(L10n.translate)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(18)
+            }
+
+            WindowReader(window: model.setHostWindow)
+                .frame(width: 0, height: 0)
+        }
+        .overlay(alignment: .top) {
+            if let message = model.noticeMessage ?? model.errorMessage {
+                Text(message)
+                    .font(.callout)
+                    .lineLimit(2)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.top, 12)
+                    .padding(.horizontal, 20)
+            }
+        }
+        .translationTask(model.configuration) { session in
+            await model.translate(using: session)
+        }
+    }
+
+    private var translationPanel: some View {
+        ViewThatFits(in: .horizontal) {
+            translationPanelContents(compact: false)
+            translationPanelContents(compact: true)
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background {
+            ZStack(alignment: .leading) {
+                Capsule().fill(.regularMaterial)
+
+                GeometryReader { geometry in
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.13))
+                        .frame(
+                            width: geometry.size.width * model.translationProgress,
+                            height: geometry.size.height
+                        )
+                }
+                .opacity(model.isTranslating ? 1 : 0)
+                .animation(.easeOut(duration: 0.2), value: model.translationProgress)
+                .animation(.easeOut(duration: 0.18), value: model.isTranslating)
+            }
+            .clipShape(Capsule())
+        }
+        .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
+    }
+
+    private func translationPanelContents(compact: Bool) -> some View {
+        HStack(spacing: compact ? 6 : 8) {
+            Button(action: model.closeTranslation) {
+                Image(systemName: "xmark")
+                    .frame(width: 24, height: 24)
+            }
+            .help(L10n.closeTranslation)
+
+            Divider().frame(height: 18)
+
+            LanguageMenu(
+                title: model.sourceLanguageName,
+                selectedIdentifier: model.sourceIdentifier,
+                includesAuto: true,
+                commonLanguages: model.commonLanguages,
+                otherLanguages: model.otherLanguages,
+                select: model.setSource
+            )
+            .frame(width: compact ? 78 : 132)
+
+            Image(systemName: "arrow.right")
+                .foregroundStyle(.secondary)
+
+            LanguageMenu(
+                title: model.targetLanguageName,
+                selectedIdentifier: model.targetIdentifier,
+                includesAuto: false,
+                commonLanguages: model.commonLanguages,
+                otherLanguages: model.otherLanguages
+            ) { identifier in
+                if let identifier {
+                    model.setTarget(identifier)
+                }
+            }
+            .frame(width: compact ? 78 : 132)
+
+            Divider().frame(height: 18)
+
+            Button(action: model.requestSaveAs) {
+                Group {
+                    if model.isSaving {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: model.didSave ? "checkmark" : "square.and.arrow.down")
+                    }
+                }
+                .frame(width: 24, height: 24)
+            }
+            .disabled(!model.canSave)
+            .help(L10n.saveAs)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private struct LanguageMenu: View {
+    let title: String
+    let selectedIdentifier: String?
+    let includesAuto: Bool
+    let commonLanguages: [LanguageOption]
+    let otherLanguages: [LanguageOption]
+    let select: (String?) -> Void
+
+    var body: some View {
+        Menu {
+            if includesAuto {
+                languageButton(identifier: nil, name: L10n.auto)
+                Divider()
+            }
+
+            ForEach(commonLanguages) { language in
+                languageButton(identifier: language.id, name: language.name)
+            }
+
+            if !otherLanguages.isEmpty {
+                Divider()
+                Menu(L10n.more) {
+                    ForEach(otherLanguages) { language in
+                        languageButton(identifier: language.id, name: language.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(title)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help(title)
+    }
+
+    private func languageButton(identifier: String?, name: String) -> some View {
+        Button {
+            select(identifier)
+        } label: {
+            if selectedIdentifier == identifier {
+                Label(name, systemImage: "checkmark")
+            } else {
+                Text(name)
+            }
+        }
+    }
+}
+
+private struct WindowReader: NSViewRepresentable {
+    let window: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { window(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { window(nsView.window) }
+    }
+}
+
+private struct LanguageOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
+private enum LanguageIdentity {
+    static func identifier(_ rawIdentifier: String) -> String {
+        let normalized = rawIdentifier.replacingOccurrences(of: "_", with: "-")
+        let language = Locale.Language(identifier: normalized)
+        guard let base = language.languageCode?.identifier else {
+            return language.minimalIdentifier
+        }
+
+        if base == "zh" {
+            let explicitScript = language.script?.identifier
+            let maximal = language.maximalIdentifier
+            return explicitScript == "Hant" || maximal.contains("-Hant-")
+                ? "zh-Hant"
+                : "zh-Hans"
+        }
+
+        return base
+    }
+
+    static func matches(_ lhs: String, _ rhs: String) -> Bool {
+        identifier(lhs) == identifier(rhs)
+    }
+
+    static func autonym(for rawIdentifier: String) -> String {
+        let identifier = identifier(rawIdentifier)
+        let autonymLocale = Locale(identifier: identifier)
+        return autonymLocale.localizedString(forIdentifier: identifier)
+            ?? Locale.Language(identifier: identifier).languageCode.flatMap {
+                autonymLocale.localizedString(forLanguageCode: $0.identifier)
+            }
+            ?? identifier
+    }
+}
+
+private struct PreviewPayload {
+    let url: URL
+    let loadedText: LoadedText
+    let document: SubtitleDocument
+}
+
+private struct LoadedText {
+    let text: String
+    let encoding: String.Encoding
+    let wasTruncated: Bool
+
+    var previewText: String {
+        guard wasTruncated else { return text }
+        return text + "\n\n" + L10n.truncated
+    }
+}
+
+private enum TextLoader {
+    private static let maximumPreviewBytes = 8 * 1_024 * 1_024
+
+    static func load(from url: URL) throws -> LoadedText {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
 
@@ -36,47 +962,259 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
         let wasTruncated = data.count > maximumPreviewBytes
         let previewData = wasTruncated ? data.prefix(maximumPreviewBytes) : data[...]
 
-        guard var text = decode(Data(previewData)) else {
+        guard let decoded = decode(Data(previewData)) else {
             throw PreviewError.unsupportedEncoding
         }
-
-        if wasTruncated {
-            text += "\n\n—— 预览已在 8 MiB 处截断 ——"
-        }
-        return text
+        return LoadedText(text: decoded.text, encoding: decoded.encoding, wasTruncated: wasTruncated)
     }
 
-    private static func decode(_ data: Data) -> String? {
+    private static func decode(_ data: Data) -> (text: String, encoding: String.Encoding)? {
         let gb18030 = String.Encoding(
             rawValue: CFStringConvertEncodingToNSStringEncoding(
-                CFStringEncoding(0x0632) // kCFStringEncodingGB_18030_2000
+                CFStringEncoding(0x0632)
             )
         )
         let encodings: [String.Encoding] = [
-            .utf8,
-            .utf16,
-            .utf16LittleEndian,
-            .utf16BigEndian,
-            .utf32,
-            .utf32LittleEndian,
-            .utf32BigEndian,
-            gb18030,
-            .isoLatin1
+            .utf8, .utf16, .utf16LittleEndian, .utf16BigEndian,
+            .utf32, .utf32LittleEndian, .utf32BigEndian, gb18030, .isoLatin1
         ]
 
         for encoding in encodings {
             if let string = String(data: data, encoding: encoding) {
-                return string
+                return (string, encoding)
             }
         }
         return nil
     }
 }
 
+private struct SubtitleDocument {
+    let lines: [String]
+    let lineEnding: String
+    let units: [SubtitleUnit]
+
+    init(text: String, fileExtension: String) {
+        lineEnding = text.contains("\r\n") ? "\r\n" : "\n"
+        lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+
+        switch fileExtension.lowercased() {
+        case "lrc":
+            units = Self.parseLRC(lines)
+        case "vtt":
+            units = Self.parseTimedCues(lines, skipsVTTBlocks: true)
+        case "srt":
+            units = Self.parseTimedCues(lines, skipsVTTBlocks: false)
+        default:
+            units = []
+        }
+    }
+
+    func render(using translations: [String: String]) -> String {
+        var rendered = lines
+        for unit in units {
+            guard let translation = translations[unit.id] else { continue }
+            rendered[unit.lineIndex] = unit.prefix + translation + unit.suffix
+        }
+        return rendered.joined(separator: lineEnding)
+    }
+
+    private static func parseTimedCues(_ lines: [String], skipsVTTBlocks: Bool) -> [SubtitleUnit] {
+        var result: [SubtitleUnit] = []
+        var insideCue = false
+        var ignoredBlock = false
+
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                insideCue = false
+                ignoredBlock = false
+                continue
+            }
+
+            if skipsVTTBlocks && !insideCue {
+                let upper = trimmed.uppercased()
+                if upper == "STYLE" || upper == "REGION" || upper.hasPrefix("NOTE") {
+                    ignoredBlock = true
+                    continue
+                }
+            }
+
+            if line.contains("-->") {
+                insideCue = true
+                ignoredBlock = false
+                continue
+            }
+
+            guard insideCue, !ignoredBlock, let template = LineTemplate(line) else { continue }
+            result.append(SubtitleUnit(
+                id: String(index),
+                lineIndex: index,
+                sourceText: template.text,
+                prefix: template.prefix,
+                suffix: template.suffix
+            ))
+        }
+        return result
+    }
+
+    private static func parseLRC(_ lines: [String]) -> [SubtitleUnit] {
+        let expression = try! NSRegularExpression(
+            pattern: "^((?:\\[\\d{1,3}:\\d{2}(?:[\\.:]\\d{1,3})?\\])+)(.*)$"
+        )
+
+        return lines.enumerated().compactMap { index, line in
+            let range = NSRange(location: 0, length: (line as NSString).length)
+            guard
+                let match = expression.firstMatch(in: line, range: range),
+                match.numberOfRanges == 3
+            else { return nil }
+
+            let string = line as NSString
+            let timestamp = string.substring(with: match.range(at: 1))
+            let content = string.substring(with: match.range(at: 2))
+            guard let template = LineTemplate(content) else { return nil }
+
+            return SubtitleUnit(
+                id: String(index),
+                lineIndex: index,
+                sourceText: template.text,
+                prefix: timestamp + template.prefix,
+                suffix: template.suffix
+            )
+        }
+    }
+}
+
+private struct SubtitleUnit {
+    let id: String
+    let lineIndex: Int
+    let sourceText: String
+    let prefix: String
+    let suffix: String
+}
+
+private struct LineTemplate {
+    let text: String
+    let prefix: String
+    let suffix: String
+
+    init?(_ line: String) {
+        let leading = String(line.prefix { $0.isWhitespace })
+        let trailing = String(line.reversed().prefix { $0.isWhitespace }.reversed())
+        var core = String(line.dropFirst(leading.count).dropLast(trailing.count))
+        var prefix = leading
+        var suffix = trailing
+        var leadingTagCount = 0
+
+        while core.first == "<", let end = core.firstIndex(of: ">") {
+            let after = core.index(after: end)
+            prefix += String(core[..<after])
+            core = String(core[after...])
+            leadingTagCount += 1
+        }
+
+        while leadingTagCount > 0, core.last == ">", let start = core.lastIndex(of: "<") {
+            suffix = String(core[start...]) + suffix
+            core = String(core[..<start])
+            leadingTagCount -= 1
+        }
+
+        let visible = core.replacingOccurrences(
+            of: "<[^>]+>",
+            with: "",
+            options: .regularExpression
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !visible.isEmpty else { return nil }
+
+        text = visible
+        self.prefix = prefix
+        self.suffix = suffix
+    }
+}
+
 private enum PreviewError: LocalizedError {
     case unsupportedEncoding
 
-    var errorDescription: String? {
-        "无法识别该文件的文本编码。"
+    var errorDescription: String? { L10n.unsupportedEncoding }
+}
+
+private enum L10n {
+    private static var zh: Bool {
+        Locale.preferredLanguages.first?.lowercased().hasPrefix("zh") == true
+    }
+
+    static var auto: String { zh ? "自动" : "Auto" }
+    static var more: String { zh ? "更多" : "More" }
+    static var noTranslationNeeded: String { zh ? "无需翻译" : "No translation needed" }
+    static var translate: String { zh ? "翻译" : "Translate" }
+    static var closeTranslation: String { zh ? "关闭翻译" : "Close translation" }
+    static var saveAs: String { zh ? "另存为" : "Save As" }
+    static var saveTranslatedSubtitle: String { zh ? "保存翻译字幕" : "Save Translated Subtitle" }
+    static var cannotShowSavePanel: String {
+        zh ? "暂时无法显示另存为面板。" : "The Save As panel is temporarily unavailable."
+    }
+    static var noSubtitleText: String {
+        zh ? "没有找到可翻译的字幕正文。" : "No translatable subtitle text was found."
+    }
+    static var cannotEncode: String {
+        zh ? "无法用原文件编码保存译文。" : "The translation can't be saved using the original encoding."
+    }
+    static var saveFailed: String {
+        zh ? "无法保存翻译字幕。" : "The translated subtitle couldn't be saved."
+    }
+    static var unsupportedEncoding: String {
+        zh ? "无法识别该文件的文本编码。" : "The file's text encoding isn't supported."
+    }
+    static var truncated: String {
+        zh ? "—— 预览已在 8 MiB 处截断，不能覆盖保存 ——" : "— Preview truncated at 8 MiB; saving is disabled —"
     }
 }
+
+#if PARSER_TEST_MAIN
+@main
+private enum ParserTests {
+    static func main() {
+        precondition(LanguageIdentity.identifier("en-US") == "en")
+        precondition(LanguageIdentity.identifier("en-GB") == "en")
+        precondition(LanguageIdentity.identifier("zh-CN") == "zh-Hans")
+        precondition(LanguageIdentity.identifier("zh-TW") == "zh-Hant")
+        precondition(LanguageIdentity.identifier("zh-HK") == "zh-Hant")
+        precondition(LanguageIdentity.matches("zh-Hant-TW", "zh-Hant-HK"))
+        precondition(LanguageIdentity.autonym(for: "en-GB") == "English")
+        precondition(LanguageIdentity.autonym(for: "zh-Hant-HK") == "繁體中文")
+
+        let vtt = SubtitleDocument(
+            text: "WEBVTT\n\nNOTE this is metadata\ndo not translate\n\n00:00:00.000 --> 00:00:02.000\n<i>Hello world</i>\nHello <b>again</b>\n\n",
+            fileExtension: "vtt"
+        )
+        precondition(vtt.units.map(\.sourceText) == ["Hello world", "Hello again"])
+        let vttRendered = vtt.render(using: ["6": "你好，世界", "7": "再次你好"])
+        precondition(vttRendered.hasPrefix("WEBVTT\n\nNOTE this is metadata"))
+        precondition(vttRendered.contains("00:00:00.000 --> 00:00:02.000"))
+        precondition(vttRendered.contains("<i>你好，世界</i>"))
+        precondition(vttRendered.contains("再次你好"))
+        precondition(!vttRendered.contains("再次你好</b>"))
+
+        let lrc = SubtitleDocument(
+            text: "[ar:Artist]\n[00:01.00]First line\n[00:02.00][00:03.00]Second line",
+            fileExtension: "lrc"
+        )
+        precondition(lrc.units.map(\.sourceText) == ["First line", "Second line"])
+        let lrcRendered = lrc.render(using: ["1": "第一行", "2": "第二行"])
+        precondition(lrcRendered.contains("[00:01.00]第一行"))
+        precondition(lrcRendered.contains("[00:02.00][00:03.00]第二行"))
+
+        let srt = SubtitleDocument(
+            text: "1\n00:00:00,000 --> 00:00:02,000\nHello\nworld\n\n",
+            fileExtension: "srt"
+        )
+        precondition(srt.units.map(\.sourceText) == ["Hello", "world"])
+        let srtRendered = srt.render(using: ["2": "你好", "3": "世界"])
+        precondition(srtRendered == "1\n00:00:00,000 --> 00:00:02,000\n你好\n世界\n\n")
+
+        print("Subtitle parser tests passed")
+    }
+}
+#endif

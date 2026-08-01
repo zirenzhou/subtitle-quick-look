@@ -10,7 +10,7 @@ extension_name="Subtitle Quick Look Preview"
 app_path="$build_root/$app_name.app"
 extension_path="$app_path/Contents/PlugIns/$extension_name.appex"
 module_cache="$build_root/ModuleCache"
-version="${VERSION:-1.0.0}"
+version="${VERSION:-2.0.0}"
 
 rm -rf "$build_root"
 mkdir -p \
@@ -37,7 +37,7 @@ add_plist_value "$app_path/Contents/Info.plist" CFBundleDisplayName string "$app
 add_plist_value "$app_path/Contents/Info.plist" CFBundlePackageType string APPL
 add_plist_value "$app_path/Contents/Info.plist" CFBundleShortVersionString string "$version"
 add_plist_value "$app_path/Contents/Info.plist" CFBundleVersion string 1
-add_plist_value "$app_path/Contents/Info.plist" LSMinimumSystemVersion string 13.0
+add_plist_value "$app_path/Contents/Info.plist" LSMinimumSystemVersion string 15.0
 add_plist_value "$app_path/Contents/Info.plist" NSHighResolutionCapable bool true
 
 add_plist_value "$extension_path/Contents/Info.plist" CFBundleExecutable string "$extension_name"
@@ -47,7 +47,7 @@ add_plist_value "$extension_path/Contents/Info.plist" CFBundleDisplayName string
 add_plist_value "$extension_path/Contents/Info.plist" CFBundlePackageType string XPC!
 add_plist_value "$extension_path/Contents/Info.plist" CFBundleShortVersionString string "$version"
 add_plist_value "$extension_path/Contents/Info.plist" CFBundleVersion string 1
-add_plist_value "$extension_path/Contents/Info.plist" LSMinimumSystemVersion string 13.0
+add_plist_value "$extension_path/Contents/Info.plist" LSMinimumSystemVersion string 15.0
 /usr/libexec/PlistBuddy -c \
   "Set :NSExtension:NSExtensionPrincipalClass SubtitleQuickLookPreview.PreviewProvider" \
   "$extension_path/Contents/Info.plist"
@@ -56,7 +56,7 @@ compile_app() {
   local arch="$1"
   xcrun swiftc \
     -module-cache-path "$module_cache" \
-    -target "$arch-apple-macos13.0" \
+    -target "$arch-apple-macos15.0" \
     -O \
     "$project_root/SubtitleQuickLook/App/main.swift" \
     -o "$build_root/app-$arch"
@@ -66,7 +66,7 @@ compile_extension() {
   local arch="$1"
   xcrun swiftc \
     -module-cache-path "$module_cache" \
-    -target "$arch-apple-macos13.0" \
+    -target "$arch-apple-macos15.0" \
     -O \
     -module-name SubtitleQuickLookPreview \
     -parse-as-library \
@@ -74,7 +74,12 @@ compile_extension() {
     -emit-executable \
     "$project_root/SubtitleQuickLook/PreviewExtension/PreviewProvider.swift" \
     -framework QuickLookUI \
+    -framework Carbon \
+    -framework NaturalLanguage \
     -framework UniformTypeIdentifiers \
+    -framework AppKit \
+    -framework SwiftUI \
+    -framework Translation \
     -Xlinker -e \
     -Xlinker _NSExtensionMain \
     -o "$build_root/extension-$arch"
