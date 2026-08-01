@@ -3,11 +3,28 @@
 [![Build](https://github.com/zirenzhou/subtitle-quick-look/actions/workflows/build.yml/badge.svg)](https://github.com/zirenzhou/subtitle-quick-look/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-一个极简的 macOS Quick Look 扩展，让 Finder 可以用空格键以纯文本方式预览 `.vtt` 和 `.lrc` 字幕/歌词文件。
+[中文说明](README.zh-CN.md)
 
-## 安装
+A tiny macOS Quick Look extension that adds plain-text previews for WebVTT (`.vtt`) subtitle files and LRC (`.lrc`) lyrics files.
 
-通过 Homebrew 安装：
+Select a supported file in Finder and press <kbd>Space</kbd> to see its original text. The extension does not render subtitles or lyrics; it deliberately presents the source as readable plain text.
+
+## Features
+
+- Finder Quick Look previews for `.vtt` and `.lrc`
+- UTF-8, UTF-16/32, GB18030, and Latin-1 decoding
+- Apple Silicon and Intel support
+- No window, Dock icon, background process, or network access
+- Preview size limited to 8 MiB to keep Quick Look responsive
+
+## Requirements
+
+- macOS 13 Ventura or later
+- Xcode 15 or later for the Homebrew source build
+
+## Install with Homebrew
+
+This repository doubles as a third-party Homebrew tap:
 
 ```bash
 brew tap zirenzhou/subtitle-quick-look https://github.com/zirenzhou/subtitle-quick-look.git
@@ -15,21 +32,21 @@ brew trust --formula zirenzhou/subtitle-quick-look/subtitle-quick-look
 brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 ```
 
-安装完成后，在 Finder 中选中 `.vtt` 或 `.lrc` 文件并按空格键即可。
+`brew trust --formula` is required by Homebrew 6 for third-party taps. It trusts only this formula, not every formula that may later appear in the tap. Skip that line if your Homebrew version does not provide `brew trust`.
 
-> 仓库名称没有使用 Homebrew 默认的 `homebrew-` 前缀，因此第一次安装需要带上完整 Tap URL。Homebrew 6 还要求首次安装时显式信任第三方 Formula；这里使用 `--formula` 只信任这一项，而不是整个 Tap。之后可以正常使用 `brew upgrade subtitle-quick-look`。
+After installation, select a `.vtt` or `.lrc` file in Finder and press <kbd>Space</kbd>.
 
-## 管理扩展
+## Manage the extension
 
-安装时 Formula 会自动注册 Quick Look 扩展。也可以手动执行：
+The formula registers the Quick Look extension automatically.
 
 ```bash
-subtitle-quick-look status       # 查看注册状态
-subtitle-quick-look register     # 重新注册并刷新 Quick Look
-subtitle-quick-look unregister   # 注销扩展
+subtitle-quick-look status       # Check registration
+subtitle-quick-look register     # Register again and refresh Quick Look
+subtitle-quick-look unregister   # Unregister before uninstalling
 ```
 
-卸载：
+To uninstall:
 
 ```bash
 subtitle-quick-look unregister
@@ -37,48 +54,43 @@ brew uninstall subtitle-quick-look
 brew untap zirenzhou/subtitle-quick-look
 ```
 
-如果 Finder 仍显示旧的预览缓存：
+If Finder still shows a stale preview, run:
 
 ```bash
 subtitle-quick-look register
 killall Finder
 ```
 
-## 为什么里面仍有一个 `.app`？
+Also check **System Settings → General → Login Items & Extensions → Quick Look** and make sure **Subtitle Quick Look Preview** is enabled.
 
-macOS 10.15 以后使用 App Extension 提供 Quick Look 预览；扩展必须位于一个 App bundle 中。这里的宿主只是一个不可见的技术容器：
+## Why is there an `.app` bundle?
 
-- 没有窗口或设置界面
-- 没有 Dock 图标
-- 不在后台常驻
-- 启动后立即退出
-- 不会成为 VTT/LRC 的默认打开方式
+Modern macOS requires Quick Look preview extensions to live inside an app bundle. The bundled host is only a technical container:
 
-用户只需要通过 Homebrew 管理它，不需要打开这个宿主。
+- it has no user interface;
+- it has no Dock icon;
+- it never stays running;
+- it exits immediately if launched; and
+- it does not become the default application for VTT or LRC files.
 
-## 支持范围
+You manage the extension entirely through Homebrew and never need to open the host.
 
-- macOS 13 Ventura 或更高版本
-- Apple Silicon 与 Intel Mac
-- UTF-8、UTF-16/32、GB18030 和 Latin-1 文本
-- 最大预览 8 MiB；更大的文件会显示截断提示
+## Privacy and limits
 
-扩展没有网络功能。文件内容只在本机由 Quick Look 读取并转换为 UTF-8 纯文本。
+Preview generation is fully local. The extension has no network capability and receives read-only access only to the file being previewed. Files larger than 8 MiB are truncated in the preview with a visible notice.
 
-## 从源码构建
-
-需要 Xcode 15 或更高版本：
+## Build from source
 
 ```bash
 ./scripts/build-release.sh
 ```
 
-输出：
+Outputs:
 
 - `build/ManualRelease/Subtitle Quick Look.app`
 - `dist/Subtitle-Quick-Look.zip`
 
-构建脚本会生成 arm64/x86_64 通用二进制，并采用本机 ad-hoc 签名。Homebrew Formula 在本机从源码构建，因此不依赖 Developer ID 或公证下载包。
+The build creates universal arm64/x86_64 binaries and applies a local ad-hoc signature. The Homebrew formula builds the extension locally, so installation does not depend on downloading and opening an unnotarized app bundle.
 
 ## License
 

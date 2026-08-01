@@ -1,8 +1,8 @@
 class SubtitleQuickLook < Formula
   desc "Quick Look plain-text previews for VTT and LRC files"
   homepage "https://github.com/zirenzhou/subtitle-quick-look"
-  url "file:///Users/stevenzzr/Documents/Steven%20Utility/dist/subtitle-quick-look-1.0.0.tar.gz"
-  sha256 "4ab37031edd3e192a252808905304d15eedc5ddaf6876c505a9f0ef7be316e21"
+  url "https://github.com/zirenzhou/subtitle-quick-look/releases/download/v1.0.0/subtitle-quick-look-1.0.0.tar.gz"
+  sha256 "b01d7addbe7a5a9d0df1d3c0158fc3fa3d2443a0280f45418c66690ec1989257"
   license "MIT"
 
   depends_on xcode: ["15.0", :build]
