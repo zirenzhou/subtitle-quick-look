@@ -13,7 +13,7 @@
             <string>None</string>
             <key>LSItemContentTypes</key>
             <array>
-                <string>io.github.zirenzhou.subtitle-quick-look.webvtt</string>
+                <string>org.w3.webvtt</string>
             </array>
         </dict>
         <dict>
@@ -42,7 +42,7 @@
             <key>UTTypeDescription</key>
             <string>WebVTT Subtitle</string>
             <key>UTTypeIdentifier</key>
-            <string>io.github.zirenzhou.subtitle-quick-look.webvtt</string>
+            <string>org.w3.webvtt</string>
             <key>UTTypeTagSpecification</key>
             <dict>
                 <key>public.filename-extension</key>
