@@ -2,7 +2,7 @@ class SubtitleQuickLook < Formula
   desc "Quick Look plain-text previews for VTT and LRC files"
   homepage "https://github.com/zirenzhou/subtitle-quick-look"
   url "file:///Users/stevenzzr/Documents/Steven%20Utility/dist/subtitle-quick-look-1.0.0.tar.gz"
-  sha256 "4e780699d24d8a29f0343b30bfd0ef8fcbd2daf16c1a1343151dd1a018f49d19"
+  sha256 "4ab37031edd3e192a252808905304d15eedc5ddaf6876c505a9f0ef7be316e21"
   license "MIT"
 
   depends_on xcode: ["15.0", :build]
@@ -38,7 +38,8 @@ class SubtitleQuickLook < Formula
           "$lsregister" -f "$app_path"
           /usr/bin/pluginkit -a "$plugin_path"
           /usr/bin/qlmanage -r >/dev/null 2>&1 || true
-          status
+          echo "registered: $extension_id"
+          echo "container: $app_path"
           ;;
         unregister)
           /usr/bin/pluginkit -r "$plugin_path" 2>/dev/null || true

@@ -6,10 +6,7 @@ import CoreFoundation
 final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
     private static let maximumPreviewBytes = 8 * 1_024 * 1_024
 
-    func providePreview(
-        for request: QLFilePreviewRequest,
-        completionHandler handler: @escaping (QLPreviewReply?, Error?) -> Void
-    ) {
+    func providePreview(for request: QLFilePreviewRequest) async throws -> QLPreviewReply {
         let fileURL = request.fileURL
         let reply = QLPreviewReply(
             dataOfContentType: .plainText,
@@ -28,7 +25,7 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
             return Data(result.utf8)
         }
 
-        handler(reply, nil)
+        return reply
     }
 
     private static func loadText(from url: URL) throws -> String {
