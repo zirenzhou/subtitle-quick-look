@@ -1,0 +1,20 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal app bundle
+        run: ./scripts/build-release.sh
+      - name: Verify code signature
+        run: codesign --verify --deep --strict --verbose=2 "build/ManualRelease/Subtitle Quick Look.app"
+      - name: Verify architectures
+        run: |
+          lipo -archs "build/ManualRelease/Subtitle Quick Look.app/Contents/MacOS/Subtitle Quick Look"
+          lipo -archs "build/ManualRelease/Subtitle Quick Look.app/Contents/PlugIns/Subtitle Quick Look Preview.appex/Contents/MacOS/Subtitle Quick Look Preview"

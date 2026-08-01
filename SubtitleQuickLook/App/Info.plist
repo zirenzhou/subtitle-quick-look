@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>LSBackgroundOnly</key>
+    <true/>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.content</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>WebVTT Subtitle</string>
+            <key>UTTypeIdentifier</key>
+            <string>io.github.zirenzhou.subtitle-quick-look.webvtt</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>vtt</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>text/vtt</string>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.content</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>LRC Lyrics</string>
+            <key>UTTypeIdentifier</key>
+            <string>io.github.zirenzhou.subtitle-quick-look.lrc</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>lrc</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>
