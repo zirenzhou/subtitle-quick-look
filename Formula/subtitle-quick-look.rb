@@ -2,7 +2,7 @@ class SubtitleQuickLook < Formula
   desc "Quick Look plain-text previews for VTT and LRC files"
   homepage "https://github.com/zirenzhou/subtitle-quick-look"
   url "file:///Users/stevenzzr/Documents/Steven%20Utility/dist/subtitle-quick-look-1.0.0.tar.gz"
-  sha256 "60c570258e2a3d1bcbbd2b502fe345be48be2bf350624951f31f5d5e47f81bdf"
+  sha256 "d7442c7820559a9c7fad8cc6c5687f63dc53979a2797d449f17604951d79b3a7"
   license "MIT"
 
   depends_on xcode: ["15.0", :build]
@@ -19,11 +19,12 @@ class SubtitleQuickLook < Formula
       set -euo pipefail
 
       app_path="#{libexec}/Subtitle Quick Look.app"
+      plugin_path="$app_path/Contents/PlugIns/Subtitle Quick Look Preview.appex"
       extension_id="io.github.zirenzhou.subtitle-quick-look.preview"
       lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
       status() {
-        if /usr/bin/pluginkit -m -A -D -i "$extension_id" | /usr/bin/grep -q "$extension_id"; then
+        if /usr/bin/pluginkit -m -D -i "$extension_id" | /usr/bin/grep -q "$extension_id"; then
           echo "registered: $extension_id"
           echo "container: $app_path"
         else
@@ -35,12 +36,12 @@ class SubtitleQuickLook < Formula
       case "${1:-status}" in
         register)
           "$lsregister" -f "$app_path"
-          /usr/bin/pluginkit -a "$app_path"
+          /usr/bin/pluginkit -a "$plugin_path"
           /usr/bin/qlmanage -r >/dev/null 2>&1 || true
           status
           ;;
         unregister)
-          /usr/bin/pluginkit -r "$app_path" 2>/dev/null || true
+          /usr/bin/pluginkit -r "$plugin_path" 2>/dev/null || true
           "$lsregister" -u "$app_path" 2>/dev/null || true
           /usr/bin/qlmanage -r >/dev/null 2>&1 || true
           echo "unregistered: $extension_id"

@@ -11,12 +11,13 @@
 
 ```bash
 brew tap zirenzhou/subtitle-quick-look https://github.com/zirenzhou/subtitle-quick-look.git
-brew install subtitle-quick-look
+brew trust --formula zirenzhou/subtitle-quick-look/subtitle-quick-look
+brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 ```
 
 安装完成后，在 Finder 中选中 `.vtt` 或 `.lrc` 文件并按空格键即可。
 
-> 仓库名称没有使用 Homebrew 默认的 `homebrew-` 前缀，因此第一次安装需要带上完整 Tap URL。之后可以正常使用 `brew upgrade subtitle-quick-look`。
+> 仓库名称没有使用 Homebrew 默认的 `homebrew-` 前缀，因此第一次安装需要带上完整 Tap URL。Homebrew 6 还要求首次安装时显式信任第三方 Formula；这里使用 `--formula` 只信任这一项，而不是整个 Tap。之后可以正常使用 `brew upgrade subtitle-quick-look`。
 
 ## 管理扩展
 
