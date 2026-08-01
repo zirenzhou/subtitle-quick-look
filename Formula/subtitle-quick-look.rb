@@ -71,7 +71,9 @@ class SubtitleQuickLook < Formula
   end
 
   test do
-    assert_match "registered: io.github.zirenzhou.subtitle-quick-look.preview",
-                 shell_output("#{bin}/subtitle-quick-look status")
+    extension = libexec/"Subtitle Quick Look.app/Contents/PlugIns/Subtitle Quick Look Preview.appex"
+    assert_path_exists extension
+    assert_match "io.github.zirenzhou.subtitle-quick-look.preview",
+                 shell_output("/usr/bin/plutil -p '#{extension}/Contents/Info.plist'")
   end
 end
