@@ -1,8 +1,8 @@
 class SubtitleQuickLook < Formula
   desc "Quick Look previews, translation, and subtitle format conversion"
   homepage "https://github.com/zirenzhou/subtitle-quick-look"
-  url "https://github.com/zirenzhou/subtitle-quick-look/releases/download/v1.1.0/subtitle-quick-look-1.1.0.tar.gz"
-  sha256 "90d995c017f172a46a3de49eae60bace11894a19327a706febfdc04d9e40963e"
+  url "https://github.com/zirenzhou/subtitle-quick-look/releases/download/v1.2.0/subtitle-quick-look-1.2.0.tar.gz"
+  sha256 "75269684c110ae4fc348b369f022731dae64035d40bac02aa087e29125f1f17f"
   license "MIT"
 
   depends_on xcode: ["16.0", :build]
