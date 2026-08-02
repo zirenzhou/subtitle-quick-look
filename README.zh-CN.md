@@ -18,6 +18,14 @@ Homebrew 6 要求首次安装第三方 Tap 时显式信任。这里的 `--formul
 
 安装后，在 Finder 中选择 `.vtt`、`.lrc` 或 `.srt` 文件并按空格键。
 
+从旧版本升级到最新版本：
+
+```bash
+brew update
+brew upgrade subtitle-quick-look
+subtitle-quick-look register
+```
+
 ## 扩展管理
 
 ```bash

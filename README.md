@@ -45,6 +45,14 @@ brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 
 After installation, select a `.vtt`, `.lrc`, or `.srt` file in Finder and press <kbd>Space</kbd>.
 
+To upgrade an existing installation to the latest release:
+
+```bash
+brew update
+brew upgrade subtitle-quick-look
+subtitle-quick-look register
+```
+
 ## Manage the extension
 
 The formula registers the Quick Look extension automatically.
