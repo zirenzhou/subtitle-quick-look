@@ -10,7 +10,7 @@ extension_name="Subtitle Quick Look Preview"
 app_path="$build_root/$app_name.app"
 extension_path="$app_path/Contents/PlugIns/$extension_name.appex"
 module_cache="$build_root/ModuleCache"
-version="${VERSION:-2.0.0}"
+version="${VERSION:-1.1.0}"
 
 rm -rf "$build_root"
 mkdir -p \
