@@ -1,10 +1,23 @@
 # Subtitle Quick Look
 
-[English](README.md)
+[English](README.md) · [更新记录](CHANGELOG.md)
 
-一个轻量的 macOS Quick Look 扩展，让 Finder 可以用空格键预览 `.vtt`、`.lrc`、`.srt`、`.ass` 和 `.ssa` 文件，并按需调用 Apple 原生翻译。
+**一个轻量的 macOS Quick Look 字幕与歌词预览扩展，同时提供 Apple 原生翻译和字幕格式转换。支持 VTT、SRT、LRC、ASS 与 SSA。**
 
-默认仍然是原生风格的纯文本预览。需要翻译时，点击角落里的翻译按钮；底部只会出现一个紧凑浮层，用于关闭翻译、选择“自动检测 → 目标语言”和保存译文。
+在 Finder 中选择字幕或歌词文件并按空格键，即可直接预览。需要时可以调用 macOS 原生翻译、批量翻译或转换字幕格式；无需 AI API、API Key、账号、常驻后台服务，也不会把字幕上传到第三方翻译接口。
+
+## 核心特点
+
+- **扩展 macOS 字幕与歌词预览：** 支持 WebVTT (`.vtt`)、SubRip (`.srt`)、LRC 歌词 (`.lrc`) 以及 ASS/SSA (`.ass`、`.ssa`)。
+- **Apple 原生翻译：** 自动识别来源语言、记忆目标语言，并支持简体中文与繁体中文本地转换。
+- **字幕格式转换与批量处理：** 保留时间轴和字幕结构，可另存为其他格式，也可通过 Finder 服务批量处理多个文件。
+- **轻量且注重隐私：** 不需要 AI API、API Key 或登录，没有 Dock 图标、自建网络服务和常驻后台进程。
+
+## 快速开始
+
+1. 使用下方 Homebrew 命令安装。
+2. 在 Finder 中选择支持的文件并按空格键。
+3. 需要翻译时点击角落按钮；需要批量操作时打开“Finder → 服务”。
 
 ## Homebrew 安装
 
@@ -15,6 +28,8 @@ brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 ```
 
 Homebrew 6 要求首次安装第三方 Tap 时显式信任。这里的 `--formula` 只信任当前 Formula；如果你的 Homebrew 版本没有 `brew trust`，跳过第二条命令即可。
+
+目前使用的是第三方 Tap。由于安装产物是包含 Quick Look 扩展的原生 macOS App bundle，未来进入 Homebrew 官方仓库时应提交到 `homebrew/cask`，而不是 `homebrew/core`。签名、公证、预编译发行包以及官方收录门槛详见 [Homebrew 官方收录路线](docs/HOMEBREW.md)。
 
 安装后，在 Finder 中选择支持的字幕文件并按空格键。安装和升级都会自动完成注册，通常不需要额外执行命令。
 

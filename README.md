@@ -2,12 +2,26 @@
 
 [![Build](https://github.com/zirenzhou/subtitle-quick-look/actions/workflows/build.yml/badge.svg)](https://github.com/zirenzhou/subtitle-quick-look/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-black.svg)](#requirements)
 
-[中文说明](README.zh-CN.md)
+[中文说明](README.zh-CN.md) · [Changelog](CHANGELOG.md)
 
-A lightweight macOS Quick Look extension for WebVTT (`.vtt`), LRC (`.lrc`), SubRip (`.srt`), and ASS/SSA subtitles, with optional translation powered by Apple's native Translation framework.
+**A lightweight macOS Quick Look extension, native subtitle translator, and format converter for VTT, SRT, LRC, ASS, and SSA files.**
 
-Select a supported file in Finder and press <kbd>Space</kbd> to see its original text. Click the small translation button in the corner when you want a translated, text-only preview.
+Select a subtitle or lyrics file in Finder and press <kbd>Space</kbd>. Subtitle Quick Look adds readable previews, optional translation through Apple's native Translation framework, and one-click conversion without an AI API, API key, account, background service, or uploaded subtitle data.
+
+## Why Subtitle Quick Look?
+
+- **Preview more subtitle and lyrics formats:** WebVTT (`.vtt`), SubRip (`.srt`), LRC lyrics (`.lrc`), and SubStation Alpha (`.ass`, `.ssa`).
+- **Translate with macOS:** automatic language detection, native Apple Translation, remembered language choices, and local Simplified/Traditional Chinese conversion.
+- **Convert and batch-process files:** preserve subtitle timing and structure, save to another format, or use localized Finder Services on multiple files.
+- **Stay lightweight and private:** no AI API, API key, sign-in, custom network service, Dock icon, or persistent background process.
+
+## Quick start
+
+1. Install with Homebrew using the commands below.
+2. Select a supported file in Finder and press <kbd>Space</kbd>.
+3. Use the corner translation button only when you need it, or open **Finder → Services** for batch translation and conversion.
 
 ## Features
 
@@ -47,6 +61,8 @@ brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 ```
 
 `brew trust --formula` is required by Homebrew 6 for third-party taps. It trusts only this formula, not every formula that may later appear in the tap. Skip that line if your Homebrew version does not provide `brew trust`.
+
+This is currently a third-party tap. Because the installed product is a native macOS app bundle containing a Quick Look extension, the correct official Homebrew destination is `homebrew/cask`, not `homebrew/core`. See the [official Homebrew distribution roadmap](docs/HOMEBREW.md) for the signing, notarization, packaging, and public-interest requirements that must be completed before submission.
 
 After installation, select a supported subtitle in Finder and press <kbd>Space</kbd>. Registration is automatic; no extra command is normally required.
 
