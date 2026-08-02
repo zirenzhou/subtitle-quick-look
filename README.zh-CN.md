@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-一个轻量的 macOS Quick Look 扩展，让 Finder 可以用空格键预览 `.vtt`、`.lrc` 和 `.srt` 文件，并按需调用 Apple 原生翻译。
+一个轻量的 macOS Quick Look 扩展，让 Finder 可以用空格键预览 `.vtt`、`.lrc`、`.srt`、`.ass` 和 `.ssa` 文件，并按需调用 Apple 原生翻译。
 
 默认仍然是原生风格的纯文本预览。需要翻译时，点击角落里的翻译按钮；底部只会出现一个紧凑浮层，用于关闭翻译、选择“自动检测 → 目标语言”和保存译文。
 
@@ -16,15 +16,31 @@ brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 
 Homebrew 6 要求首次安装第三方 Tap 时显式信任。这里的 `--formula` 只信任当前 Formula；如果你的 Homebrew 版本没有 `brew trust`，跳过第二条命令即可。
 
-安装后，在 Finder 中选择 `.vtt`、`.lrc` 或 `.srt` 文件并按空格键。
+安装后，在 Finder 中选择支持的字幕文件并按空格键。安装和升级都会自动完成注册，通常不需要额外执行命令。
 
 从旧版本升级到最新版本：
 
 ```bash
 brew update
 brew upgrade subtitle-quick-look
+```
+
+如果安装或升级后 macOS 没有立即刷新 Quick Look 或 Finder 服务，请执行 Homebrew 安装提示中给出的兜底命令：
+
+```bash
 subtitle-quick-look register
 ```
+
+## Finder 服务
+
+在 Finder 中选择一份或多份字幕，然后打开“Finder → 服务”：
+
+- **转换字幕…**：用紧凑下拉框统一选择输出格式，在原文件旁生成新文件，不覆盖源文件。这里只改变字幕格式，不改变语言。
+- **翻译文件…**：选择来源语言与目标语言；默认按语言后缀另存副本，只有勾选“替换原文件”时才以原子写入覆盖所选文件。
+
+服务菜单和弹窗会跟随设备语言，当前支持简体中文、繁体中文、英文、日文和韩文；语言选择使用该语言自己的写法，并与 Quick Look 共用偏好。服务宿主只会在执行操作时启动，完成后自动退出。
+
+目前入口位于“服务”，是因为 v1.2 使用 macOS `NSServices`：它天然支持 Finder 多选文件，也适合由 Homebrew 轻量注册。“快速操作”是另一种独立扩展类型，有单独的沙盒、签名、激活与启用流程；要显示在“快速操作”分组，需要另外嵌入 Action Extension，并不是把同一个菜单项换个位置。
 
 ## 扩展管理
 
@@ -59,6 +75,9 @@ killall Finder
 - 翻译栏会适配较窄的 Quick Look 窗口，始终保留“另存为”入口
 - 常用区最多展示 6 种系统及最近使用的语言；合并英语、繁体中文等地区重复项，语言名使用该语言自己的写法，其余折叠到“更多”
 - 只翻译字幕正文，保存时保留时间轴和字幕格式
+- “另存为”默认保持原始格式，也可以转换为 WebVTT、SRT、LRC 或 ASS/SSA
+- Finder 服务支持多选批量转换和批量翻译
+- 繁体中文与简体中文之间使用 macOS 本地系统转换，补足 Apple Translation 未开放的直接语言对
 - 记忆翻译开关和语言选择
 - 通过 macOS 系统“另存为”面板保存译文，并默认添加目标语言后缀
 - 支持 UTF-8、UTF-16/32、GB18030 和 Latin-1
@@ -67,7 +86,13 @@ killall Finder
 - 解析和 Apple 翻译均在本机完成
 - 超过 8 MiB 的文件会截断并显示提示，同时禁用另存为
 
-现代 macOS 要求 Quick Look Preview Extension 位于 App bundle 内。项目中的宿主只是不可见的技术容器，启动后会立即退出；用户不需要打开或管理它。
+现代 macOS 要求 Quick Look Preview Extension 和 Services 位于 App bundle 内。项目中的宿主只是不可见的技术容器，仅在处理 Finder 服务时短暂运行并自动退出；用户不需要打开或管理它。
+
+Finder 的“翻译文件”服务默认保留原文件，并用目标语言后缀另存副本；只有用户明确勾选“替换原文件”时才会覆盖。
+
+## iOS 说明
+
+字幕解析与转换核心仅依赖 Foundation，已经可以复用于未来的 iOS Action/Share Extension。Homebrew 无法安装或签名 iOS 扩展，因此 iOS 文件/分享菜单操作需要后续通过单独签名的 iOS 配套 App 发布，不包含在当前 macOS Homebrew 包中。
 
 ## 从源码构建
 

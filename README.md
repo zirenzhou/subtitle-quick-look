@@ -5,13 +5,13 @@
 
 [中文说明](README.zh-CN.md)
 
-A lightweight macOS Quick Look extension for WebVTT (`.vtt`), LRC (`.lrc`), and SubRip (`.srt`) files, with optional translation powered by Apple's native Translation framework.
+A lightweight macOS Quick Look extension for WebVTT (`.vtt`), LRC (`.lrc`), SubRip (`.srt`), and ASS/SSA subtitles, with optional translation powered by Apple's native Translation framework.
 
 Select a supported file in Finder and press <kbd>Space</kbd> to see its original text. Click the small translation button in the corner when you want a translated, text-only preview.
 
 ## Features
 
-- Finder Quick Look previews for `.vtt`, `.lrc`, and `.srt`
+- Finder Quick Look previews for `.vtt`, `.lrc`, `.srt`, `.ass`, and `.ssa`
 - Native Apple Translation with automatic source-language detection
 - Target language defaults to the macOS preferred language
 - Files already written in the device's primary language never auto-translate; a manual request uses a separately remembered secondary target language
@@ -21,6 +21,11 @@ Select a supported file in Finder and press <kbd>Space</kbd> to see its original
 - Remembers whether translation is enabled and the selected languages
 - Sends only subtitle text for translation; timestamps and subtitle structure stay intact
 - Native Save As panel with a target-language filename suggestion
+- Save As keeps the original format by default and can convert the result to WebVTT, SRT, LRC, or ASS/SSA
+- Localized Finder Services can convert or translate multiple selected subtitles at once
+- **Convert Subtitles…** creates new sibling files and never overwrites the source
+- **Translate Files…** asks for source/target languages and saves language-suffixed copies by default; replacing the selected originals is an explicit option
+- Traditional/Simplified Chinese conversion uses the local macOS system transform when Apple Translation does not expose that language pair
 - UTF-8, UTF-16/32, GB18030, and Latin-1 decoding
 - Apple Silicon and Intel support
 - No separate window, Dock icon, background process, or custom network service
@@ -43,19 +48,35 @@ brew install zirenzhou/subtitle-quick-look/subtitle-quick-look
 
 `brew trust --formula` is required by Homebrew 6 for third-party taps. It trusts only this formula, not every formula that may later appear in the tap. Skip that line if your Homebrew version does not provide `brew trust`.
 
-After installation, select a `.vtt`, `.lrc`, or `.srt` file in Finder and press <kbd>Space</kbd>.
+After installation, select a supported subtitle in Finder and press <kbd>Space</kbd>. Registration is automatic; no extra command is normally required.
 
 To upgrade an existing installation to the latest release:
 
 ```bash
 brew update
 brew upgrade subtitle-quick-look
+```
+
+If macOS does not refresh Quick Look or Finder Services immediately after an install or upgrade, run the fallback command printed by Homebrew:
+
+```bash
 subtitle-quick-look register
 ```
 
+## Finder Services
+
+Select one or more subtitle files, then open **Finder → Services**:
+
+- **Convert Subtitles…** asks for one compact output format and creates new files next to the originals. It changes the subtitle format, not the language.
+- **Translate Files…** asks for source and target languages. It saves language-suffixed copies by default, or atomically replaces the selected originals when **Replace original files** is enabled.
+
+The service menus and dialogs follow the device language in English, Simplified Chinese, Traditional Chinese, Japanese, or Korean. Language choices use autonyms and are shared with Quick Look. The Services host launches only for the requested operation and exits afterward.
+
+These commands appear under **Services** because v1.2 uses macOS `NSServices`, which supports multi-file Finder input and lightweight Homebrew registration. Finder **Quick Actions** are a separate extension type with their own sandbox, signing, activation, and enablement lifecycle; moving the same commands there requires a separately embedded Action extension rather than a menu relocation.
+
 ## Manage the extension
 
-The formula registers the Quick Look extension automatically.
+The formula automatically registers the Quick Look extension and refreshes Finder Services during install and upgrade.
 
 ```bash
 subtitle-quick-look status       # Check registration
@@ -82,19 +103,23 @@ Also check **System Settings → General → Login Items & Extensions → Quick 
 
 ## Why is there an `.app` bundle?
 
-Modern macOS requires Quick Look preview extensions to live inside an app bundle. The bundled host is only a technical container:
+Modern macOS requires Quick Look preview extensions and Services to live inside an app bundle. The bundled host is only a technical container:
 
 - it has no user interface;
 - it has no Dock icon;
-- it never stays running;
-- it exits immediately if launched; and
+- it runs only while a Finder Service is handling selected files;
+- it exits automatically after the operation; and
 - it does not become the default application for VTT, LRC, or SRT files.
 
 You manage the extension entirely through Homebrew and never need to open the host.
 
+## iOS note
+
+The subtitle parsing and conversion core is Foundation-only so it can be reused by a future iOS Action/Share extension. Homebrew cannot install or sign iOS extensions, so an iOS Files/Share Sheet action must ship later as a separately signed iOS companion app; it is not included in this macOS Homebrew package.
+
 ## Privacy and limits
 
-Preview parsing and Apple Translation run locally. The extension does not add its own network service. It requests write access only to the destination you explicitly choose in the macOS Save As panel. Files larger than 8 MiB are truncated in the preview and cannot be saved from Quick Look.
+Preview parsing, Chinese script conversion, and Apple Translation run locally. The extension does not add its own network service. Quick Look writes only to a destination you explicitly choose in the Save As panel. **Translate Files…** preserves originals by default; replacement happens only when you explicitly enable **Replace original files**. Files larger than 8 MiB are truncated in the preview and cannot be saved from Quick Look.
 
 ## Build from source
 

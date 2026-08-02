@@ -30,7 +30,7 @@ final class PreviewProvider: NSViewController, QLPreviewingController {
                         }
                     }
 
-                    let loaded = try TextLoader.load(from: url)
+                    let loaded = try TextLoader.loadPreview(from: url)
                     return PreviewPayload(
                         url: url,
                         loadedText: loaded,
@@ -135,7 +135,9 @@ private final class PreviewModel: ObservableObject {
         loadedText = payload.loadedText
         document = payload.document
         filename = payload.url.lastPathComponent
-        originalText = payload.loadedText.previewText
+        originalText = payload.loadedText.wasTruncated
+            ? payload.loadedText.text + "\n\n" + L10n.truncated
+            : payload.loadedText.text
         translatedText = ""
         translations = [:]
         errorMessage = nil
@@ -275,7 +277,7 @@ private final class PreviewModel: ObservableObject {
     }
 
     func requestSaveAs() {
-        guard canSave, let fileURL else { return }
+        guard canSave, let fileURL, let sourceFormat = document?.format else { return }
         guard let window = hostWindow else {
             errorMessage = L10n.cannotShowSavePanel
             return
@@ -287,30 +289,36 @@ private final class PreviewModel: ObservableObject {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.directoryURL = fileURL.deletingLastPathComponent()
-        panel.nameFieldStringValue = suggestedFilename(for: fileURL)
-        if let contentType = UTType(filenameExtension: fileURL.pathExtension) {
-            panel.allowedContentTypes = [contentType]
+        panel.nameFieldStringValue = suggestedFilename(for: fileURL, outputFormat: sourceFormat)
+        panel.allowedContentTypes = [contentType(for: sourceFormat)]
+
+        let accessory = SaveFormatAccessoryController(originalFormat: sourceFormat)
+        accessory.onChange = { [weak panel, weak self] format in
+            guard let panel, let self else { return }
+            panel.allowedContentTypes = [self.contentType(for: format)]
+            panel.nameFieldStringValue = self.suggestedFilename(
+                for: fileURL,
+                outputFormat: format
+            )
         }
+        panel.accessoryView = accessory.view
 
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let destinationURL = panel.url else { return }
+            let outputFormat = accessory.selectedFormat
             Task { @MainActor in
-                self?.saveTranslatedCopy(to: destinationURL)
+                self?.saveTranslatedCopy(to: destinationURL, outputFormat: outputFormat)
             }
         }
     }
 
     private func beginTranslation() {
-        guard translationIsOpen, document != nil else { return }
-        if let sourceIdentifier,
-           LanguageIdentity.matches(sourceIdentifier, targetIdentifier) {
-            finishWithoutTranslation()
-            return
-        }
-        if sourceIdentifier == nil,
-           let document,
-           let detectedSource = Self.detectedSourceLanguage(in: document),
-           LanguageIdentity.matches(detectedSource, targetIdentifier) {
+        guard translationIsOpen, let document else { return }
+        let effectiveSource = sourceIdentifier
+            ?? detectedDocumentLanguageIdentifier
+            ?? Self.detectedSourceLanguage(in: document)
+        if let effectiveSource,
+           LanguageIdentity.matches(effectiveSource, targetIdentifier) {
             finishWithoutTranslation()
             return
         }
@@ -322,6 +330,21 @@ private final class PreviewModel: ObservableObject {
         translationProgress = 0
         startProgressAnimation(for: translationRevision)
 
+        if let effectiveSource,
+           let localTranslations = ChineseScriptConverter.translations(
+               for: document.units,
+               sourceIdentifier: effectiveSource,
+               targetIdentifier: targetIdentifier
+           ) {
+            configuration = nil
+            completeLocalTranslation(
+                localTranslations,
+                document: document,
+                revision: translationRevision
+            )
+            return
+        }
+
         let source = sourceIdentifier.map(Locale.Language.init(identifier:))
         let target = Locale.Language(identifier: targetIdentifier)
         if var existing = configuration {
@@ -331,6 +354,27 @@ private final class PreviewModel: ObservableObject {
             configuration = existing
         } else {
             configuration = TranslationSession.Configuration(source: source, target: target)
+        }
+    }
+
+    private func completeLocalTranslation(
+        _ translated: [String: String],
+        document: SubtitleDocument,
+        revision: UUID
+    ) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard let self,
+                  self.translationIsOpen,
+                  self.translationRevision == revision else { return }
+            self.translations = translated
+            self.progressTask?.cancel()
+            self.translationProgress = 1
+            try? await Task.sleep(for: .milliseconds(180))
+            guard self.translationIsOpen,
+                  self.translationRevision == revision else { return }
+            self.translatedText = document.render(using: translated)
+            self.isTranslating = false
         }
     }
 
@@ -411,24 +455,32 @@ private final class PreviewModel: ObservableObject {
         )
     }
 
-    private func suggestedFilename(for fileURL: URL) -> String {
+    private func suggestedFilename(for fileURL: URL, outputFormat: SubtitleFormat) -> String {
         let stem = fileURL.deletingPathExtension().lastPathComponent
         let language = targetIdentifier.replacingOccurrences(of: "/", with: "-")
-        let fileExtension = fileURL.pathExtension
-        return fileExtension.isEmpty
-            ? "\(stem).\(language)"
-            : "\(stem).\(language).\(fileExtension)"
+        return "\(stem).\(language).\(outputFormat.fileExtension)"
     }
 
-    private func saveTranslatedCopy(to destinationURL: URL) {
+    private func contentType(for format: SubtitleFormat) -> UTType {
+        UTType(filenameExtension: format.fileExtension) ?? .plainText
+    }
+
+    private func saveTranslatedCopy(to destinationURL: URL, outputFormat: SubtitleFormat) {
         guard
             let loadedText,
             let document,
             canSave
         else { return }
 
-        let output = document.render(using: translations)
-        guard let data = output.data(using: loadedText.encoding, allowLossyConversion: false)
+        let output: String
+        do {
+            output = try document.render(using: translations, as: outputFormat)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        let outputEncoding = outputFormat == document.format ? loadedText.encoding : .utf8
+        guard let data = output.data(using: outputEncoding, allowLossyConversion: false)
             ?? output.data(using: .utf8)
         else {
             errorMessage = L10n.cannotEncode
@@ -685,8 +737,69 @@ private final class PreviewModel: ObservableObject {
     }
 }
 
+@MainActor
+private final class SaveFormatAccessoryController: NSViewController {
+    var onChange: ((SubtitleFormat) -> Void)?
+
+    private let formats: [SubtitleFormat]
+    private let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+
+    var selectedFormat: SubtitleFormat {
+        formats[max(0, popup.indexOfSelectedItem)]
+    }
+
+    init(originalFormat: SubtitleFormat) {
+        formats = [originalFormat] + SubtitleFormat.allCases.filter { $0 != originalFormat }
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 228, height: 34))
+        let label = NSTextField(labelWithString: L10n.format)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        popup.translatesAutoresizingMaskIntoConstraints = false
+        for (index, format) in formats.enumerated() {
+            let title = index == 0
+                ? "\(format.compactDisplayName) (\(L10n.originalFormat))"
+                : format.compactDisplayName
+            popup.addItem(withTitle: title)
+        }
+        popup.setContentHuggingPriority(.required, for: .horizontal)
+        popup.setContentCompressionResistancePriority(.required, for: .horizontal)
+        popup.target = self
+        popup.action = #selector(formatChanged)
+
+        container.addSubview(label)
+        container.addSubview(popup)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            popup.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
+            popup.widthAnchor.constraint(equalToConstant: 152),
+            popup.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+        view = container
+    }
+
+    @objc private func formatChanged() {
+        onChange?(selectedFormat)
+    }
+}
+
 private struct PreviewRootView: View {
     @ObservedObject var model: PreviewModel
+    @State private var hoveredTranslationControl: TranslationControl?
+
+    private enum TranslationControl {
+        case close
+        case save
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -773,8 +886,11 @@ private struct PreviewRootView: View {
         HStack(spacing: compact ? 6 : 8) {
             Button(action: model.closeTranslation) {
                 Image(systemName: "xmark")
-                    .frame(width: 24, height: 24)
             }
+            .buttonStyle(TranslationIconButtonStyle(
+                isHovered: hoveredTranslationControl == .close
+            ))
+            .onHover { updateHover(.close, isHovering: $0) }
             .help(L10n.closeTranslation)
 
             Divider().frame(height: 18)
@@ -815,12 +931,41 @@ private struct PreviewRootView: View {
                         Image(systemName: model.didSave ? "checkmark" : "square.and.arrow.down")
                     }
                 }
-                .frame(width: 24, height: 24)
             }
+            .buttonStyle(TranslationIconButtonStyle(
+                isHovered: hoveredTranslationControl == .save
+            ))
+            .onHover { updateHover(.save, isHovering: $0) }
             .disabled(!model.canSave)
             .help(L10n.saveAs)
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func updateHover(_ control: TranslationControl, isHovering: Bool) {
+        hoveredTranslationControl = isHovering ? control : nil
+        if isHovering {
+            NSCursor.pointingHand.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+}
+
+private struct TranslationIconButtonStyle: ButtonStyle {
+    let isHovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 32, height: 28)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+            .background {
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.primary.opacity(
+                        configuration.isPressed ? 0.14 : (isHovered ? 0.08 : 0)
+                    ))
+            }
+            .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }
 
@@ -900,245 +1045,12 @@ private struct LanguageOption: Identifiable, Hashable {
     let name: String
 }
 
-private enum LanguageIdentity {
-    static func identifier(_ rawIdentifier: String) -> String {
-        let normalized = rawIdentifier.replacingOccurrences(of: "_", with: "-")
-        let language = Locale.Language(identifier: normalized)
-        guard let base = language.languageCode?.identifier else {
-            return language.minimalIdentifier
-        }
-
-        if base == "zh" {
-            let explicitScript = language.script?.identifier
-            let maximal = language.maximalIdentifier
-            return explicitScript == "Hant" || maximal.contains("-Hant-")
-                ? "zh-Hant"
-                : "zh-Hans"
-        }
-
-        return base
-    }
-
-    static func matches(_ lhs: String, _ rhs: String) -> Bool {
-        identifier(lhs) == identifier(rhs)
-    }
-
-    static func autonym(for rawIdentifier: String) -> String {
-        let identifier = identifier(rawIdentifier)
-        let autonymLocale = Locale(identifier: identifier)
-        return autonymLocale.localizedString(forIdentifier: identifier)
-            ?? Locale.Language(identifier: identifier).languageCode.flatMap {
-                autonymLocale.localizedString(forLanguageCode: $0.identifier)
-            }
-            ?? identifier
-    }
-}
-
 private struct PreviewPayload {
     let url: URL
     let loadedText: LoadedText
     let document: SubtitleDocument
 }
 
-private struct LoadedText {
-    let text: String
-    let encoding: String.Encoding
-    let wasTruncated: Bool
-
-    var previewText: String {
-        guard wasTruncated else { return text }
-        return text + "\n\n" + L10n.truncated
-    }
-}
-
-private enum TextLoader {
-    private static let maximumPreviewBytes = 8 * 1_024 * 1_024
-
-    static func load(from url: URL) throws -> LoadedText {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-
-        let data = try handle.read(upToCount: maximumPreviewBytes + 1) ?? Data()
-        let wasTruncated = data.count > maximumPreviewBytes
-        let previewData = wasTruncated ? data.prefix(maximumPreviewBytes) : data[...]
-
-        guard let decoded = decode(Data(previewData)) else {
-            throw PreviewError.unsupportedEncoding
-        }
-        return LoadedText(text: decoded.text, encoding: decoded.encoding, wasTruncated: wasTruncated)
-    }
-
-    private static func decode(_ data: Data) -> (text: String, encoding: String.Encoding)? {
-        let gb18030 = String.Encoding(
-            rawValue: CFStringConvertEncodingToNSStringEncoding(
-                CFStringEncoding(0x0632)
-            )
-        )
-        let encodings: [String.Encoding] = [
-            .utf8, .utf16, .utf16LittleEndian, .utf16BigEndian,
-            .utf32, .utf32LittleEndian, .utf32BigEndian, gb18030, .isoLatin1
-        ]
-
-        for encoding in encodings {
-            if let string = String(data: data, encoding: encoding) {
-                return (string, encoding)
-            }
-        }
-        return nil
-    }
-}
-
-private struct SubtitleDocument {
-    let lines: [String]
-    let lineEnding: String
-    let units: [SubtitleUnit]
-
-    init(text: String, fileExtension: String) {
-        lineEnding = text.contains("\r\n") ? "\r\n" : "\n"
-        lines = text.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .components(separatedBy: "\n")
-
-        switch fileExtension.lowercased() {
-        case "lrc":
-            units = Self.parseLRC(lines)
-        case "vtt":
-            units = Self.parseTimedCues(lines, skipsVTTBlocks: true)
-        case "srt":
-            units = Self.parseTimedCues(lines, skipsVTTBlocks: false)
-        default:
-            units = []
-        }
-    }
-
-    func render(using translations: [String: String]) -> String {
-        var rendered = lines
-        for unit in units {
-            guard let translation = translations[unit.id] else { continue }
-            rendered[unit.lineIndex] = unit.prefix + translation + unit.suffix
-        }
-        return rendered.joined(separator: lineEnding)
-    }
-
-    private static func parseTimedCues(_ lines: [String], skipsVTTBlocks: Bool) -> [SubtitleUnit] {
-        var result: [SubtitleUnit] = []
-        var insideCue = false
-        var ignoredBlock = false
-
-        for (index, line) in lines.enumerated() {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                insideCue = false
-                ignoredBlock = false
-                continue
-            }
-
-            if skipsVTTBlocks && !insideCue {
-                let upper = trimmed.uppercased()
-                if upper == "STYLE" || upper == "REGION" || upper.hasPrefix("NOTE") {
-                    ignoredBlock = true
-                    continue
-                }
-            }
-
-            if line.contains("-->") {
-                insideCue = true
-                ignoredBlock = false
-                continue
-            }
-
-            guard insideCue, !ignoredBlock, let template = LineTemplate(line) else { continue }
-            result.append(SubtitleUnit(
-                id: String(index),
-                lineIndex: index,
-                sourceText: template.text,
-                prefix: template.prefix,
-                suffix: template.suffix
-            ))
-        }
-        return result
-    }
-
-    private static func parseLRC(_ lines: [String]) -> [SubtitleUnit] {
-        let expression = try! NSRegularExpression(
-            pattern: "^((?:\\[\\d{1,3}:\\d{2}(?:[\\.:]\\d{1,3})?\\])+)(.*)$"
-        )
-
-        return lines.enumerated().compactMap { index, line in
-            let range = NSRange(location: 0, length: (line as NSString).length)
-            guard
-                let match = expression.firstMatch(in: line, range: range),
-                match.numberOfRanges == 3
-            else { return nil }
-
-            let string = line as NSString
-            let timestamp = string.substring(with: match.range(at: 1))
-            let content = string.substring(with: match.range(at: 2))
-            guard let template = LineTemplate(content) else { return nil }
-
-            return SubtitleUnit(
-                id: String(index),
-                lineIndex: index,
-                sourceText: template.text,
-                prefix: timestamp + template.prefix,
-                suffix: template.suffix
-            )
-        }
-    }
-}
-
-private struct SubtitleUnit {
-    let id: String
-    let lineIndex: Int
-    let sourceText: String
-    let prefix: String
-    let suffix: String
-}
-
-private struct LineTemplate {
-    let text: String
-    let prefix: String
-    let suffix: String
-
-    init?(_ line: String) {
-        let leading = String(line.prefix { $0.isWhitespace })
-        let trailing = String(line.reversed().prefix { $0.isWhitespace }.reversed())
-        var core = String(line.dropFirst(leading.count).dropLast(trailing.count))
-        var prefix = leading
-        var suffix = trailing
-        var leadingTagCount = 0
-
-        while core.first == "<", let end = core.firstIndex(of: ">") {
-            let after = core.index(after: end)
-            prefix += String(core[..<after])
-            core = String(core[after...])
-            leadingTagCount += 1
-        }
-
-        while leadingTagCount > 0, core.last == ">", let start = core.lastIndex(of: "<") {
-            suffix = String(core[start...]) + suffix
-            core = String(core[..<start])
-            leadingTagCount -= 1
-        }
-
-        let visible = core.replacingOccurrences(
-            of: "<[^>]+>",
-            with: "",
-            options: .regularExpression
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !visible.isEmpty else { return nil }
-
-        text = visible
-        self.prefix = prefix
-        self.suffix = suffix
-    }
-}
-
-private enum PreviewError: LocalizedError {
-    case unsupportedEncoding
-
-    var errorDescription: String? { L10n.unsupportedEncoding }
-}
 
 private enum L10n {
     private static var zh: Bool {
@@ -1151,6 +1063,8 @@ private enum L10n {
     static var translate: String { zh ? "翻译" : "Translate" }
     static var closeTranslation: String { zh ? "关闭翻译" : "Close translation" }
     static var saveAs: String { zh ? "另存为" : "Save As" }
+    static var format: String { zh ? "格式" : "Format" }
+    static var originalFormat: String { zh ? "原始格式" : "Original Format" }
     static var saveTranslatedSubtitle: String { zh ? "保存翻译字幕" : "Save Translated Subtitle" }
     static var cannotShowSavePanel: String {
         zh ? "暂时无法显示另存为面板。" : "The Save As panel is temporarily unavailable."
@@ -1171,50 +1085,3 @@ private enum L10n {
         zh ? "—— 预览已在 8 MiB 处截断，不能覆盖保存 ——" : "— Preview truncated at 8 MiB; saving is disabled —"
     }
 }
-
-#if PARSER_TEST_MAIN
-@main
-private enum ParserTests {
-    static func main() {
-        precondition(LanguageIdentity.identifier("en-US") == "en")
-        precondition(LanguageIdentity.identifier("en-GB") == "en")
-        precondition(LanguageIdentity.identifier("zh-CN") == "zh-Hans")
-        precondition(LanguageIdentity.identifier("zh-TW") == "zh-Hant")
-        precondition(LanguageIdentity.identifier("zh-HK") == "zh-Hant")
-        precondition(LanguageIdentity.matches("zh-Hant-TW", "zh-Hant-HK"))
-        precondition(LanguageIdentity.autonym(for: "en-GB") == "English")
-        precondition(LanguageIdentity.autonym(for: "zh-Hant-HK") == "繁體中文")
-
-        let vtt = SubtitleDocument(
-            text: "WEBVTT\n\nNOTE this is metadata\ndo not translate\n\n00:00:00.000 --> 00:00:02.000\n<i>Hello world</i>\nHello <b>again</b>\n\n",
-            fileExtension: "vtt"
-        )
-        precondition(vtt.units.map(\.sourceText) == ["Hello world", "Hello again"])
-        let vttRendered = vtt.render(using: ["6": "你好，世界", "7": "再次你好"])
-        precondition(vttRendered.hasPrefix("WEBVTT\n\nNOTE this is metadata"))
-        precondition(vttRendered.contains("00:00:00.000 --> 00:00:02.000"))
-        precondition(vttRendered.contains("<i>你好，世界</i>"))
-        precondition(vttRendered.contains("再次你好"))
-        precondition(!vttRendered.contains("再次你好</b>"))
-
-        let lrc = SubtitleDocument(
-            text: "[ar:Artist]\n[00:01.00]First line\n[00:02.00][00:03.00]Second line",
-            fileExtension: "lrc"
-        )
-        precondition(lrc.units.map(\.sourceText) == ["First line", "Second line"])
-        let lrcRendered = lrc.render(using: ["1": "第一行", "2": "第二行"])
-        precondition(lrcRendered.contains("[00:01.00]第一行"))
-        precondition(lrcRendered.contains("[00:02.00][00:03.00]第二行"))
-
-        let srt = SubtitleDocument(
-            text: "1\n00:00:00,000 --> 00:00:02,000\nHello\nworld\n\n",
-            fileExtension: "srt"
-        )
-        precondition(srt.units.map(\.sourceText) == ["Hello", "world"])
-        let srtRendered = srt.render(using: ["2": "你好", "3": "世界"])
-        precondition(srtRendered == "1\n00:00:00,000 --> 00:00:02,000\n你好\n世界\n\n")
-
-        print("Subtitle parser tests passed")
-    }
-}
-#endif

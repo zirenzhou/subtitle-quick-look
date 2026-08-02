@@ -11,7 +11,10 @@
                 <string>org.w3.webvtt</string>
                 <string>io.github.zirenzhou.subtitle-quick-look.lrc</string>
                 <string>io.github.zirenzhou.subtitle-quick-look.srt</string>
+                <string>io.github.zirenzhou.subtitle-quick-look.ass</string>
                 <string>com.firecore.fileformat.srt</string>
+                <string>com.firecore.fileformat.ass</string>
+                <string>com.firecore.fileformat.ssa</string>
                 <string>dyn.ah62d4rv4ge81g6xy</string>
             </array>
             <key>QLSupportsSearchableItems</key>

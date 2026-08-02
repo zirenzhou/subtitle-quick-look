@@ -10,7 +10,7 @@ extension_name="Subtitle Quick Look Preview"
 app_path="$build_root/$app_name.app"
 extension_path="$app_path/Contents/PlugIns/$extension_name.appex"
 module_cache="$build_root/ModuleCache"
-version="${VERSION:-1.1.0}"
+version="${VERSION:-1.2.0}"
 
 rm -rf "$build_root"
 mkdir -p \
@@ -58,7 +58,14 @@ compile_app() {
     -module-cache-path "$module_cache" \
     -target "$arch-apple-macos15.0" \
     -O \
+    -parse-as-library \
+    "$project_root/SubtitleQuickLook/Shared/SubtitleCore.swift" \
+    "$project_root/SubtitleQuickLook/App/ServiceProvider.swift" \
     "$project_root/SubtitleQuickLook/App/main.swift" \
+    -framework AppKit \
+    -framework NaturalLanguage \
+    -framework SwiftUI \
+    -framework Translation \
     -o "$build_root/app-$arch"
 }
 
@@ -72,6 +79,7 @@ compile_extension() {
     -parse-as-library \
     -application-extension \
     -emit-executable \
+    "$project_root/SubtitleQuickLook/Shared/SubtitleCore.swift" \
     "$project_root/SubtitleQuickLook/PreviewExtension/PreviewProvider.swift" \
     -framework QuickLookUI \
     -framework Carbon \
@@ -112,6 +120,15 @@ rm -f "$archive_dir/Subtitle-Quick-Look.zip"
 ditto -c -k --sequesterRsrc --keepParent \
   "$app_path" \
   "$archive_dir/Subtitle-Quick-Look.zip"
+
+# Keep only the runnable universal app and distributable archive. The per-architecture
+# binaries and Swift module cache are build intermediates and can exceed 250 MiB.
+rm -rf "$module_cache"
+rm -f \
+  "$build_root/app-arm64" \
+  "$build_root/app-x86_64" \
+  "$build_root/extension-arm64" \
+  "$build_root/extension-x86_64"
 
 echo "Built: $app_path"
 echo "Package: $archive_dir/Subtitle-Quick-Look.zip"

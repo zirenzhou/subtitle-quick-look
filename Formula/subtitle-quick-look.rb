@@ -1,5 +1,5 @@
 class SubtitleQuickLook < Formula
-  desc "Quick Look previews and native translation for VTT, LRC, and SRT files"
+  desc "Quick Look previews, translation, and subtitle format conversion"
   homepage "https://github.com/zirenzhou/subtitle-quick-look"
   url "https://github.com/zirenzhou/subtitle-quick-look/releases/download/v1.1.0/subtitle-quick-look-1.1.0.tar.gz"
   sha256 "90d995c017f172a46a3de49eae60bace11894a19327a706febfdc04d9e40963e"
@@ -37,6 +37,7 @@ class SubtitleQuickLook < Formula
         register)
           "$lsregister" -f "$app_path"
           /usr/bin/pluginkit -a "$plugin_path"
+          "$app_path/Contents/MacOS/Subtitle Quick Look" --register-services >/dev/null 2>&1
           /usr/bin/qlmanage -r >/dev/null 2>&1 || true
           echo "registered: $extension_id"
           echo "container: $app_path"
@@ -65,6 +66,10 @@ class SubtitleQuickLook < Formula
   def caveats
     <<~EOS
       The Quick Look extension is registered automatically.
+      Finder Services are also refreshed automatically after install or upgrade.
+      If macOS does not show the extension or Services immediately, run:
+        subtitle-quick-look register
+
       Before uninstalling, unregister it with:
         subtitle-quick-look unregister
     EOS

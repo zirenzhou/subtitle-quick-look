@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -40,8 +42,87 @@
                 <string>io.github.zirenzhou.subtitle-quick-look.srt</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SubStation Alpha Subtitle</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>None</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>io.github.zirenzhou.subtitle-quick-look.ass</string>
+                <string>com.firecore.fileformat.ass</string>
+                <string>com.firecore.fileformat.ssa</string>
+            </array>
+        </dict>
     </array>
-    <key>LSBackgroundOnly</key>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Convert Subtitles…</string>
+                <key>en</key>
+                <string>Convert Subtitles…</string>
+                <key>zh-Hans</key>
+                <string>转换字幕…</string>
+                <key>zh-Hant</key>
+                <string>轉換字幕…</string>
+                <key>ja</key>
+                <string>字幕を変換…</string>
+                <key>ko</key>
+                <string>자막 변환…</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>convertSubtitles</string>
+            <key>NSPortName</key>
+            <string>Subtitle Quick Look</string>
+            <key>NSSendTypes</key>
+            <array>
+                <string>NSFilenamesPboardType</string>
+            </array>
+            <key>NSRequiredContext</key>
+            <dict>
+                <key>NSTextContent</key>
+                <string>FilePath</string>
+            </dict>
+        </dict>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Translate Files…</string>
+                <key>en</key>
+                <string>Translate Files…</string>
+                <key>zh-Hans</key>
+                <string>翻译文件…</string>
+                <key>zh-Hant</key>
+                <string>翻譯檔案…</string>
+                <key>ja</key>
+                <string>ファイルを翻訳…</string>
+                <key>ko</key>
+                <string>파일 번역…</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>translateFiles</string>
+            <key>NSPortName</key>
+            <string>Subtitle Quick Look</string>
+            <key>NSSendTypes</key>
+            <array>
+                <string>NSFilenamesPboardType</string>
+            </array>
+            <key>NSRequiredContext</key>
+            <dict>
+                <key>NSTextContent</key>
+                <string>FilePath</string>
+            </dict>
+        </dict>
+    </array>
+    <key>NSSupportsAutomaticTermination</key>
     <true/>
     <key>UTImportedTypeDeclarations</key>
     <array>
@@ -104,6 +185,27 @@
                 </array>
                 <key>public.mime-type</key>
                 <string>application/x-subrip</string>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.plain-text</string>
+                <string>public.content</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>SubStation Alpha Subtitle</string>
+            <key>UTTypeIdentifier</key>
+            <string>io.github.zirenzhou.subtitle-quick-look.ass</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>ass</string>
+                    <string>ssa</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>text/x-ssa</string>
             </dict>
         </dict>
     </array>
