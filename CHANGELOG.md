@@ -2,6 +2,14 @@
 
 All notable user-facing changes are recorded here. GitHub tags use semantic versioning.
 
+## Unreleased
+
+### Added
+
+- Plain-text `.txt` parsing and native translation in Finder workflows, including Shift-JIS, EUC-JP, Windows-1252, and other existing text encodings.
+- A lightweight self-healing LaunchAgent that checks Quick Look registration after login and every 15 minutes, repairs stale state, and exits without remaining active in the background.
+- Duplicate registrations from older installs are removed so macOS cannot randomly route previews to stale app copies.
+
 ## [1.2.0](https://github.com/zirenzhou/subtitle-quick-look/releases/tag/v1.2.0) — 2026-08-02
 
 ### Added

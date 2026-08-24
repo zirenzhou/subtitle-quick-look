@@ -6,6 +6,8 @@
     <dict>
         <key>NSExtensionAttributes</key>
         <dict>
+            <key>QLIsDataBasedPreview</key>
+            <true/>
             <key>QLSupportedContentTypes</key>
             <array>
                 <string>org.w3.webvtt</string>
@@ -16,6 +18,7 @@
                 <string>com.firecore.fileformat.ass</string>
                 <string>com.firecore.fileformat.ssa</string>
                 <string>dyn.ah62d4rv4ge81g6xy</string>
+                <string>public.plain-text</string>
             </array>
             <key>QLSupportsSearchableItems</key>
             <false/>

@@ -12,7 +12,7 @@ Select a subtitle or lyrics file in Finder and press <kbd>Space</kbd>. Subtitle 
 
 ## Why Subtitle Quick Look?
 
-- **Preview more subtitle and lyrics formats:** WebVTT (`.vtt`), SubRip (`.srt`), LRC lyrics (`.lrc`), and SubStation Alpha (`.ass`, `.ssa`).
+- **Preview more subtitle and lyrics formats:** WebVTT (`.vtt`), SubRip (`.srt`), LRC lyrics (`.lrc`), and SubStation Alpha (`.ass`, `.ssa`), with shared plain-text (`.txt`) parsing for Finder workflows.
 - **Translate with macOS:** automatic language detection, native Apple Translation, remembered language choices, and local Simplified/Traditional Chinese conversion.
 - **Convert and batch-process files:** preserve subtitle timing and structure, save to another format, or use localized Finder Services on multiple files.
 - **Stay lightweight and private:** no AI API, API key, sign-in, custom network service, Dock icon, or persistent background process.
@@ -26,6 +26,7 @@ Select a subtitle or lyrics file in Finder and press <kbd>Space</kbd>. Subtitle 
 ## Features
 
 - Finder Quick Look previews for `.vtt`, `.lrc`, `.srt`, `.ass`, and `.ssa`
+- Plain-text `.txt` parsing and translation in Finder Services, including legacy encodings such as Shift-JIS
 - Native Apple Translation with automatic source-language detection
 - Target language defaults to the macOS preferred language
 - Files already written in the device's primary language never auto-translate; a manual request uses a separately remembered secondary target language
@@ -40,9 +41,9 @@ Select a subtitle or lyrics file in Finder and press <kbd>Space</kbd>. Subtitle 
 - **Convert Subtitles…** creates new sibling files and never overwrites the source
 - **Translate Files…** asks for source/target languages and saves language-suffixed copies by default; replacing the selected originals is an explicit option
 - Traditional/Simplified Chinese conversion uses the local macOS system transform when Apple Translation does not expose that language pair
-- UTF-8, UTF-16/32, GB18030, and Latin-1 decoding
+- UTF-8, UTF-16/32, Shift-JIS, EUC-JP, GB18030, Windows-1252, and Latin-1 decoding
 - Apple Silicon and Intel support
-- No separate window, Dock icon, background process, or custom network service
+- No separate window, Dock icon, persistent background process, or custom network service
 - Preview size limited to 8 MiB to keep Quick Look responsive
 
 ## Requirements
@@ -93,10 +94,12 @@ These commands appear under **Services** because v1.2 uses macOS `NSServices`, w
 ## Manage the extension
 
 The formula automatically registers the Quick Look extension and refreshes Finder Services during install and upgrade.
+It also installs a lightweight LaunchAgent that verifies registration after login and every 15 minutes. The helper repairs missing or stale registration, removes older duplicate registrations, and exits immediately; it is not a persistent background process.
 
 ```bash
 subtitle-quick-look status       # Check registration
 subtitle-quick-look register     # Register again and refresh Quick Look
+subtitle-quick-look install-autostart # Restore login registration if needed
 subtitle-quick-look unregister   # Unregister before uninstalling
 ```
 
@@ -128,6 +131,8 @@ Modern macOS requires Quick Look preview extensions and Services to live inside 
 - it does not become the default application for VTT, LRC, or SRT files.
 
 You manage the extension entirely through Homebrew and never need to open the host.
+
+macOS assigns `public.plain-text` to its built-in text previewer. A third-party Preview Extension may declare `.txt` support, but current macOS releases do not guarantee that Space-bar preview requests are routed to it. Shift-JIS and other legacy-encoded TXT files are therefore handled reliably through the **Translate Files…** Finder Service rather than by replacing Apple's TXT previewer.
 
 ## iOS note
 

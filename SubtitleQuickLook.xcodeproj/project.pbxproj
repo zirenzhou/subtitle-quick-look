@@ -318,7 +318,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SubtitleQuickLook/App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.zirenzhou.subtitle-quick-look;
 				PRODUCT_NAME = "Subtitle Quick Look";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -338,7 +338,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SubtitleQuickLook/App/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.zirenzhou.subtitle-quick-look;
 				PRODUCT_NAME = "Subtitle Quick Look";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -358,7 +358,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SubtitleQuickLook/PreviewExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.zirenzhou.subtitle-quick-look.preview;
 				PRODUCT_MODULE_NAME = SubtitleQuickLookPreview;
 				PRODUCT_NAME = "Subtitle Quick Look Preview";
@@ -379,7 +379,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SubtitleQuickLook/PreviewExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.zirenzhou.subtitle-quick-look.preview;
 				PRODUCT_MODULE_NAME = SubtitleQuickLookPreview;
 				PRODUCT_NAME = "Subtitle Quick Look Preview";

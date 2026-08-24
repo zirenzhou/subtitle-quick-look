@@ -749,7 +749,12 @@ private final class SaveFormatAccessoryController: NSViewController {
     }
 
     init(originalFormat: SubtitleFormat) {
-        formats = [originalFormat] + SubtitleFormat.allCases.filter { $0 != originalFormat }
+        if originalFormat == .txt {
+            formats = [.txt]
+        } else {
+            formats = [originalFormat]
+                + SubtitleFormat.timedSubtitleCases.filter { $0 != originalFormat }
+        }
         super.init(nibName: nil, bundle: nil)
     }
 

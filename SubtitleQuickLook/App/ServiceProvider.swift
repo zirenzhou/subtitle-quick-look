@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import NaturalLanguage
 import SwiftUI
@@ -16,6 +17,16 @@ final class SubtitleQuickLookAppDelegate: NSObject, NSApplicationDelegate {
             NSPasteboard.PasteboardType("NSFilenamesPboardType"),
         ], returnTypes: [])
         NSUpdateDynamicServices()
+
+        if CommandLine.arguments.contains("--register-all") {
+            let succeeded = SelfRegistration.register(bundleURL: Bundle.main.bundleURL)
+            Darwin.exit(succeeded ? EXIT_SUCCESS : EXIT_FAILURE)
+        }
+
+        if CommandLine.arguments.contains("--ensure-registration") {
+            let succeeded = SelfRegistration.ensure(bundleURL: Bundle.main.bundleURL)
+            Darwin.exit(succeeded ? EXIT_SUCCESS : EXIT_FAILURE)
+        }
 
         serviceProvider.onActivity = { [weak self] in
             self?.terminationTask?.cancel()
@@ -41,6 +52,126 @@ final class SubtitleQuickLookAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+private enum SelfRegistration {
+    private static let extensionIdentifier = "io.github.zirenzhou.subtitle-quick-look.preview"
+
+    static func ensure(bundleURL: URL) -> Bool {
+        let pluginURL = pluginURL(for: bundleURL)
+        let registeredPaths = registeredPluginPaths()
+        let desiredPath = pluginURL.standardizedFileURL.path
+        let stalePaths = registeredPaths.filter { $0 != desiredPath }
+
+        if registeredPaths.contains(desiredPath), stalePaths.isEmpty {
+            return true
+        }
+
+        removeStaleRegistrations(stalePaths)
+        return register(bundleURL: bundleURL)
+    }
+
+    static func register(bundleURL: URL) -> Bool {
+        let pluginURL = pluginURL(for: bundleURL)
+        let desiredPath = pluginURL.standardizedFileURL.path
+
+        removeStaleRegistrations(registeredPluginPaths().filter { $0 != desiredPath })
+
+        for attempt in 1...3 {
+            _ = run(
+                "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                ["-f", bundleURL.path]
+            )
+            _ = run("/usr/bin/pluginkit", ["-a", pluginURL.path])
+            _ = run("/usr/bin/pluginkit", ["-e", "use", "-i", extensionIdentifier])
+            NSUpdateDynamicServices()
+
+            if registeredPluginPaths().contains(desiredPath) {
+                _ = run("/usr/bin/qlmanage", ["-r"])
+                return true
+            }
+
+            if attempt < 3 {
+                Thread.sleep(forTimeInterval: Double(attempt))
+            }
+        }
+
+        writeDiagnostic("Quick Look registration failed after 3 attempts: \(desiredPath)")
+        return false
+    }
+
+    private static func pluginURL(for bundleURL: URL) -> URL {
+        let pluginURL = bundleURL
+            .appendingPathComponent("Contents/PlugIns", isDirectory: true)
+            .appendingPathComponent("Subtitle Quick Look Preview.appex", isDirectory: true)
+        return pluginURL
+    }
+
+    private static func registeredPluginPaths() -> [String] {
+        let result = run(
+            "/usr/bin/pluginkit",
+            ["-m", "-A", "-D", "-v", "-i", extensionIdentifier],
+            capturesOutput: true
+        )
+        guard result.status == EXIT_SUCCESS else { return [] }
+
+        return result.output
+            .split(separator: "\n")
+            .compactMap { line in
+                guard line.contains(extensionIdentifier),
+                      let path = line.split(separator: "\t").last,
+                      path.hasSuffix(".appex") else { return nil }
+                return URL(fileURLWithPath: String(path)).standardizedFileURL.path
+            }
+    }
+
+    private static func removeStaleRegistrations(_ pluginPaths: [String]) {
+        for pluginPath in pluginPaths {
+            _ = run("/usr/bin/pluginkit", ["-r", pluginPath])
+            if let range = pluginPath.range(of: ".app/Contents/PlugIns/") {
+                let appPath = String(pluginPath[..<range.lowerBound]) + ".app"
+                _ = run(
+                    "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                    ["-u", appPath]
+                )
+            }
+        }
+    }
+
+    private struct ProcessResult {
+        let status: Int32
+        let output: String
+    }
+
+    private static func run(
+        _ executable: String,
+        _ arguments: [String],
+        capturesOutput: Bool = false
+    ) -> ProcessResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let outputPipe = capturesOutput ? Pipe() : nil
+        process.standardOutput = outputPipe ?? FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = outputPipe?.fileHandleForReading.readDataToEndOfFile() ?? Data()
+            return ProcessResult(
+                status: process.terminationStatus,
+                output: String(data: data, encoding: .utf8) ?? ""
+            )
+        } catch {
+            writeDiagnostic("Could not run \(executable): \(error.localizedDescription)")
+            return ProcessResult(status: EXIT_FAILURE, output: "")
+        }
+    }
+
+    private static func writeDiagnostic(_ message: String) {
+        guard let data = "Subtitle Quick Look: \(message)\n".data(using: .utf8) else { return }
+        try? FileHandle.standardError.write(contentsOf: data)
+    }
+}
+
 @MainActor
 final class SubtitleServiceProvider: NSObject {
     var onActivity: (() -> Void)?
@@ -55,7 +186,7 @@ final class SubtitleServiceProvider: NSObject {
         error errorPointer: AutoreleasingUnsafeMutablePointer<NSString?>
     ) {
         onActivity?()
-        let urls = supportedURLs(from: pasteboard)
+        let urls = supportedURLs(from: pasteboard, includesPlainText: false)
         guard !urls.isEmpty else {
             errorPointer.pointee = ServiceL10n.selectSubtitles as NSString
             onFinished?()
@@ -99,7 +230,7 @@ final class SubtitleServiceProvider: NSObject {
         error errorPointer: AutoreleasingUnsafeMutablePointer<NSString?>
     ) {
         onActivity?()
-        let urls = supportedURLs(from: pasteboard)
+        let urls = supportedURLs(from: pasteboard, includesPlainText: true)
         guard !urls.isEmpty else {
             errorPointer.pointee = ServiceL10n.selectSubtitles as NSString
             onFinished?()
@@ -137,7 +268,10 @@ final class SubtitleServiceProvider: NSObject {
         }
     }
 
-    private func supportedURLs(from pasteboard: NSPasteboard) -> [URL] {
+    private func supportedURLs(
+        from pasteboard: NSPasteboard,
+        includesPlainText: Bool
+    ) -> [URL] {
         var urls: [URL] = []
         let filenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
         if let filenames = pasteboard.propertyList(forType: filenamesType) as? [String] {
@@ -152,7 +286,8 @@ final class SubtitleServiceProvider: NSObject {
 
         var seen = Set<String>()
         return urls.filter { url in
-            guard SubtitleFormat(fileExtension: url.pathExtension) != nil else { return false }
+            guard let format = SubtitleFormat(fileExtension: url.pathExtension) else { return false }
+            guard includesPlainText || format != .txt else { return false }
             return seen.insert(url.standardizedFileURL.path).inserted
         }
     }
@@ -165,8 +300,8 @@ final class SubtitleServiceProvider: NSObject {
         alert.addButton(withTitle: ServiceL10n.cancel)
 
         let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 148, height: 26))
-        SubtitleFormat.allCases.forEach { popup.addItem(withTitle: $0.compactDisplayName) }
-        if let srtIndex = SubtitleFormat.allCases.firstIndex(of: .srt) {
+        SubtitleFormat.timedSubtitleCases.forEach { popup.addItem(withTitle: $0.compactDisplayName) }
+        if let srtIndex = SubtitleFormat.timedSubtitleCases.firstIndex(of: .srt) {
             popup.selectItem(at: srtIndex)
         }
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 226, height: 28))
@@ -179,7 +314,7 @@ final class SubtitleServiceProvider: NSObject {
         alert.accessoryView = accessory
 
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        return SubtitleFormat.allCases[max(0, popup.indexOfSelectedItem)]
+        return SubtitleFormat.timedSubtitleCases[max(0, popup.indexOfSelectedItem)]
     }
 
     private func chooseTranslationOptions(

@@ -2,6 +2,7 @@ import CoreFoundation
 import Foundation
 
 enum SubtitleFormat: String, CaseIterable, Sendable {
+    case txt
     case vtt
     case srt
     case lrc
@@ -9,6 +10,7 @@ enum SubtitleFormat: String, CaseIterable, Sendable {
 
     init?(fileExtension: String) {
         switch fileExtension.lowercased() {
+        case "txt", "text": self = .txt
         case "vtt": self = .vtt
         case "srt": self = .srt
         case "lrc": self = .lrc
@@ -21,6 +23,7 @@ enum SubtitleFormat: String, CaseIterable, Sendable {
 
     var displayName: String {
         switch self {
+        case .txt: "Plain Text (.txt)"
         case .vtt: "WebVTT (.vtt)"
         case .srt: "SubRip (.srt)"
         case .lrc: "LRC (.lrc)"
@@ -30,12 +33,15 @@ enum SubtitleFormat: String, CaseIterable, Sendable {
 
     var compactDisplayName: String {
         switch self {
+        case .txt: "TXT"
         case .vtt: "VTT"
         case .srt: "SRT"
         case .lrc: "LRC"
         case .ass: "ASS"
         }
     }
+
+    static let timedSubtitleCases: [SubtitleFormat] = [.vtt, .srt, .lrc, .ass]
 }
 
 struct LoadedText {
@@ -80,22 +86,59 @@ enum TextLoader {
     }
 
     private static func decode(_ data: Data) -> (text: String, encoding: String.Encoding)? {
+        let byteOrderMarkedEncodings: [([UInt8], String.Encoding)] = [
+            ([0x00, 0x00, 0xFE, 0xFF], .utf32BigEndian),
+            ([0xFF, 0xFE, 0x00, 0x00], .utf32LittleEndian),
+            ([0xFE, 0xFF], .utf16BigEndian),
+            ([0xFF, 0xFE], .utf16LittleEndian)
+        ]
+        for (marker, encoding) in byteOrderMarkedEncodings where data.starts(with: marker) {
+            if let string = String(data: data, encoding: encoding) {
+                return (string, encoding)
+            }
+        }
+
+        if let string = String(data: data, encoding: .utf8) {
+            return (string, .utf8)
+        }
+
         let gb18030 = String.Encoding(
             rawValue: CFStringConvertEncodingToNSStringEncoding(
                 CFStringEncoding(0x0632)
             )
         )
-        let encodings: [String.Encoding] = [
-            .utf8, .utf16, .utf16LittleEndian, .utf16BigEndian,
-            .utf32, .utf32LittleEndian, .utf32BigEndian, gb18030, .isoLatin1
-        ]
+        let shiftJIS = String(data: data, encoding: .shiftJIS)
+        if let shiftJIS, containsJapaneseSyllabary(shiftJIS) {
+            return (shiftJIS, .shiftJIS)
+        }
 
-        for encoding in encodings {
+        let japaneseEUC = String(data: data, encoding: .japaneseEUC)
+        if let japaneseEUC, containsJapaneseSyllabary(japaneseEUC) {
+            return (japaneseEUC, .japaneseEUC)
+        }
+
+        if let string = String(data: data, encoding: gb18030) {
+            return (string, gb18030)
+        }
+        if let shiftJIS {
+            return (shiftJIS, .shiftJIS)
+        }
+        if let japaneseEUC {
+            return (japaneseEUC, .japaneseEUC)
+        }
+        for encoding in [String.Encoding.windowsCP1252, .isoLatin1] {
             if let string = String(data: data, encoding: encoding) {
                 return (string, encoding)
             }
         }
         return nil
+    }
+
+    private static func containsJapaneseSyllabary(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            (0x3040...0x30FF).contains(scalar.value)
+                || (0xFF66...0xFF9D).contains(scalar.value)
+        }
     }
 }
 
@@ -183,6 +226,8 @@ struct SubtitleDocument {
         format = SubtitleFormat(fileExtension: fileExtension)
 
         switch format {
+        case .txt:
+            units = Self.parsePlainText(lines)
         case .lrc:
             units = Self.parseLRC(lines)
         case .vtt:
@@ -253,6 +298,19 @@ struct SubtitleDocument {
             ))
         }
         return result
+    }
+
+    private static func parsePlainText(_ lines: [String]) -> [SubtitleUnit] {
+        lines.enumerated().compactMap { index, line in
+            guard let template = LineTemplate(line) else { return nil }
+            return SubtitleUnit(
+                id: String(index),
+                lineIndex: index,
+                sourceText: template.text,
+                prefix: template.prefix,
+                suffix: template.suffix
+            )
+        }
     }
 
     private static func parseLRC(_ lines: [String]) -> [SubtitleUnit] {
@@ -380,6 +438,8 @@ struct SubtitleTimeline: Sendable {
     init(text: String, format: SubtitleFormat) throws {
         let parsed: [SubtitleCue]
         switch format {
+        case .txt:
+            throw SubtitleCoreError.unsupportedFormat
         case .vtt:
             parsed = Self.parseTimed(text, skipsVTTBlocks: true)
         case .srt:
@@ -397,6 +457,8 @@ struct SubtitleTimeline: Sendable {
 
     func render(as format: SubtitleFormat) -> String {
         switch format {
+        case .txt:
+            return cues.map(\.text).joined(separator: "\n") + "\n"
         case .vtt:
             return "WEBVTT\n\n" + cues.enumerated().map { index, cue in
                 "\(index + 1)\n\(Self.webVTTTime(cue.start)) --> \(Self.webVTTTime(cue.end))\n\(cue.text)"

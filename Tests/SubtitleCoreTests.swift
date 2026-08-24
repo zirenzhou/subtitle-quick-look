@@ -7,9 +7,60 @@ private enum SubtitleCoreTests {
         testLanguageIdentity()
         testChineseScriptConversion()
         testStructurePreservingTranslation()
+        testPlainTextTranslation()
+        try testShiftJISDecoding()
+        try testGB18030Decoding()
         try testFormatConversion()
         try testTraditionalChineseFixture()
         print("Subtitle core tests passed")
+    }
+
+    private static func testPlainTextTranslation() {
+        let text = "  Hello world  \n\nSecond line\n"
+        let document = SubtitleDocument(text: text, fileExtension: "txt")
+        precondition(document.format == .txt)
+        precondition(document.units.map(\.sourceText) == ["Hello world", "Second line"])
+        precondition(document.render(using: ["0": "你好，世界", "2": "第二行"])
+            == "  你好，世界  \n\n第二行\n")
+        let saved = try? document.render(using: ["0": "你好"], as: .txt)
+        precondition(saved == "  你好  \n\nSecond line\n")
+    }
+
+    private static func testShiftJISDecoding() throws {
+        let expected = "これはShift-JISのテキストです。\n字幕を翻訳できます。\n"
+        guard let data = expected.data(using: .shiftJIS) else {
+            preconditionFailure("Could not create Shift-JIS test data")
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("subtitle-quick-look-\(UUID().uuidString).txt")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let loaded = try TextLoader.loadComplete(from: url)
+        precondition(loaded.text == expected)
+        precondition(loaded.encoding == .shiftJIS)
+    }
+
+    private static func testGB18030Decoding() throws {
+        let expected = "这是 GB18030 编码的文本。\n字幕可以正常预览。\n"
+        let gb18030 = String.Encoding(
+            rawValue: CFStringConvertEncodingToNSStringEncoding(
+                CFStringEncoding(0x0632)
+            )
+        )
+        guard let data = expected.data(using: gb18030) else {
+            preconditionFailure("Could not create GB18030 test data")
+        }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("subtitle-quick-look-\(UUID().uuidString).txt")
+        try data.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let loaded = try TextLoader.loadComplete(from: url)
+        precondition(loaded.text == expected)
+        precondition(loaded.encoding == gb18030)
     }
 
     private static func testLanguageIdentity() {
