@@ -44,6 +44,7 @@ fi
 PLIST
 
 /usr/bin/plutil -lint "$agent_path" >/dev/null
+"$target_app/Contents/MacOS/Subtitle Quick Look" --register-all
 /bin/launchctl bootstrap "$launch_domain" "$agent_path"
 /bin/launchctl enable "$launch_domain/$agent_label"
 

@@ -10,6 +10,10 @@ All notable user-facing changes are recorded here. GitHub tags use semantic vers
 - A lightweight self-healing LaunchAgent that checks Quick Look registration after login and every 15 minutes, repairs stale state, and exits without remaining active in the background.
 - Duplicate registrations from older installs are removed so macOS cannot randomly route previews to stale app copies.
 
+### Fixed
+
+- Restored interactive Quick Look previews after removing an incompatible data-based preview declaration that made Finder fall back to its generic file-information panel.
+
 ## [1.2.0](https://github.com/zirenzhou/subtitle-quick-look/releases/tag/v1.2.0) — 2026-08-02
 
 ### Added
